@@ -11,17 +11,61 @@ let projectsCache = null;
 let projectsCacheTime = 0;
 const CACHE_TTL_MS = 2 * 60 * 1000; // ۲ دقیقه کش تا فشار کمتری به Google API وارد بشه
 
+// مقدار private_key ممکنه دو حالت داشته باشه بسته به اینکه چطور توی
+// متغیر محیطی وارد شده: یا شامل کاراکترهای متنی \n (که باید به newline واقعی تبدیل بشن)
+// یا از قبل شامل newline واقعی باشه (که نیازی به تبدیل نداره). این تابع هر دو حالت رو پوشش میده.
+function normalizePrivateKey(raw) {
+  if (!raw) return raw;
+  let key = raw.trim();
+  // اگه دور کل مقدار کوتیشن اضافه مونده باشه (مثلا از کپی‌پیست اشتباه)، پاکش کن
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+  // اگه شامل کاراکتر متنی \n هست، تبدیلش کن به newline واقعی
+  if (key.includes("\\n")) {
+    key = key.replace(/\\n/g, "\n");
+  }
+  return key;
+}
+
 async function getDoc() {
   if (doc) return doc;
 
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const key = normalizePrivateKey(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
+
+  // چک اولیه فرمت کلید - قبل از اینکه به گوگل درخواست بزنیم
+  if (!key || !key.includes("BEGIN PRIVATE KEY")) {
+    throw new Error(
+      "فرمت GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY نامعتبره - باید شامل 'BEGIN PRIVATE KEY' باشه."
+    );
+  }
+
   const serviceAccountAuth = new JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    email,
+    key,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
   doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
-  await doc.loadInfo();
+
+  try {
+    await doc.loadInfo();
+  } catch (err) {
+    // لاگ دقیق‌تر برای دیباگ - جزئیات خطای واقعی گوگل رو نشون میده
+    doc = null; // ریست کن که دفعه بعد دوباره تلاش کنه
+    const detail = err?.response?.data?.error || err.message;
+    console.error("❌ خطا در اتصال به Google Sheets:", JSON.stringify(detail));
+    throw new Error(
+      `اتصال به Google Sheets ناموفق بود: ${
+        detail?.message || err.message
+      } (کد: ${detail?.code || err?.response?.status || "نامشخص"})`
+    );
+  }
+
   return doc;
 }
 
