@@ -1,0 +1,20 @@
+{
+  "name": "diyar-amlak-bot",
+  "version": "1.0.0",
+  "description": "ربات هوشمند دریافت اطلاعات فایل و تخمین قیمت - دفتر املاک دیار",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "@google/generative-ai": "^0.21.0",
+    "google-spreadsheet": "^4.1.4",
+    "google-auth-library": "^9.15.0",
+    "express": "^4.21.2",
+    "dotenv": "^16.4.7",
+    "cors": "^2.8.5"
+  }
+}
