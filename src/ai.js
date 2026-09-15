@@ -135,7 +135,7 @@ ${priceLine}
 function buildGreeting(project) {
   const fields = project.fields?.length ? project.fields : ["مشخصات کلی فایلتون"];
   const fieldsLine = fields.join("، ");
-  return `سلام 🌷 من پیش‌هوش هستم، دستیار هوشمند دفتر املاک دیار.\nبرای پروژه «${project.name}» شروع می‌کنیم.\n\nلطفاً ${fieldsLine} رو با هم برام بفرستید؟`;
+  return `برای پروژه «${project.name}» شروع می‌کنیم.\nلطفاً ${fieldsLine} رو با هم برام بفرستید؟`;
 }
 
 /**
