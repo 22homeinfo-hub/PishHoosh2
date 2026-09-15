@@ -7,10 +7,15 @@
 // ۴) کیبورد پیشنهادی با اسم پروژه‌ها نمایش داده می‌شود تا کاربر مجبور نباشد اسم را تایپ کند.
 // ۵) هندلر خطای عمومی بات ثبت شده تا یک خطای پیش‌بینی‌نشده کل پروسه را نکشد.
 // ۶) در گروه‌ها فقط وقتی ربات mention شود پاسخ می‌دهد (جلوگیری از مصرف بی‌رویه سهمیه).
+// ۷) [جدید] قبل از هر چیزی، از کاربر با یک دکمه اختصاصی تلگرام (request_contact) خواسته
+//    می‌شود شماره‌اش را به اشتراک بگذارد. این کار خودکار و بدون تایپ انجام می‌شود.
+//    بعد از دریافت شماره، دیگر در طول مکالمه اسم/شماره پرسیده نمی‌شود مگر کاربر خودش
+//    بخواهد آن را عوض کند.
 
 import "./env.js";
 import TelegramBot from "node-telegram-bot-api";
-import { handleUserMessage, startOver } from "./conversation.js";
+import { handleUserMessage, startOver, getWelcomeMessage } from "./conversation.js";
+import { getSession, resetSession } from "./sessions.js";
 import { setNotifier } from "./notify.js";
 import { chunkText } from "./text.js";
 
@@ -18,6 +23,15 @@ const TELEGRAM_MAX_LENGTH = 4096;
 const ALLOW_GROUP_CHATS = String(process.env.ALLOW_GROUP_CHATS || "false").toLowerCase() === "true";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim() || null;
 const SOURCE_LABEL = "تلگرام";
+
+const CONTACT_REQUEST_TEXT =
+  "سلام 🌷 من پیش‌هوش هستم، دستیار هوشمند دفتر املاک دیار.\n\nبرای شروع، لطفاً با دکمه زیر شماره تماستون رو با من به اشتراک بذارید 👇";
+
+const CONTACT_BUTTON_MARKUP = {
+  keyboard: [[{ text: "📱 اشتراک‌گذاری شماره تماس", request_contact: true }]],
+  resize_keyboard: true,
+  one_time_keyboard: true,
+};
 
 // نشانگر تایپینگ را تا وقتی کار تمام نشده زنده نگه می‌دارد
 function keepTyping(bot, chatId) {
@@ -46,7 +60,6 @@ function keyboardMarkup(names) {
 async function reply(bot, chatId, result) {
   const text = String(result?.message ?? "").trim();
   if (!text) {
-    // هرگز پیام خالی به تلگرام نمی‌فرستیم
     return bot.sendMessage(chatId, "متاسفانه پاسخی تولید نشد 🙏 لطفاً دوباره امتحان کنید.");
   }
 
@@ -61,6 +74,15 @@ async function reply(bot, chatId, result) {
   }
 }
 
+// آیا این کاربر قبلاً شماره‌اش را به اشتراک گذاشته؟
+function hasContact(session) {
+  return Boolean(session.contact?.phone);
+}
+
+async function askForContact(bot, chatId) {
+  await bot.sendMessage(chatId, CONTACT_REQUEST_TEXT, { reply_markup: CONTACT_BUTTON_MARKUP });
+}
+
 export function startTelegramBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) {
@@ -71,7 +93,6 @@ export function startTelegramBot() {
   const bot = new TelegramBot(token, { polling: { interval: 300, timeout: 20 } });
   let botId = null;
 
-  // اطلاع‌رسانی به مدیر (اگر ADMIN_CHAT_ID تنظیم شده باشد)
   if (ADMIN_CHAT_ID) {
     setNotifier(async (message) => {
       for (const chunk of chunkText(message, TELEGRAM_MAX_LENGTH - 100)) {
@@ -95,7 +116,7 @@ export function startTelegramBot() {
     const key = `telegram:${chatId}`;
     const stopTyping = keepTyping(bot, chatId);
     try {
-      const result = text ? await handleUserMessage(key, text, SOURCE_LABEL) : await startOver(key);
+      const result = text ? await handleUserMessage(key, text, SOURCE_LABEL) : await startOver(key, getSession(key).contact);
       await reply(bot, chatId, result);
     } catch (err) {
       console.error("❌ خطا در پردازش پیام تلگرام:", err.message || err);
@@ -109,21 +130,68 @@ export function startTelegramBot() {
     }
   };
 
+  // دستور /start یا /restart: اگر شماره هنوز گرفته نشده، اول دکمه اشتراک شماره را نشان بده
   bot.onText(/^\/(start|restart)(@\w+)?(\s.*)?$/i, async (msg, match) => {
     if (!isUsableChat(msg)) return;
     const command = match[1].toLowerCase();
-    if (command === "restart") return runCommand(msg, "شروع مجدد");
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+
+    if (command === "restart") {
+      resetSession(key);
+      await askForContact(bot, chatId);
+      return;
+    }
+
+    const session = getSession(key);
+    if (!hasContact(session)) {
+      await askForContact(bot, chatId);
+      return;
+    }
     return runCommand(msg, null);
+  });
+
+  // وقتی کاربر روی دکمه «اشتراک‌گذاری شماره تماس» می‌زند، تلگرام یک پیام با msg.contact می‌فرستد
+  bot.on("contact", async (msg) => {
+    if (!isUsableChat(msg)) return;
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+    const session = getSession(key);
+
+    const phoneDigits = String(msg.contact?.phone_number || "").replace(/[^\d+]/g, "");
+    const name = [msg.contact?.first_name, msg.contact?.last_name].filter(Boolean).join(" ").trim();
+
+    session.contact = { customerName: name || session.contact?.customerName || "", phone: phoneDigits };
+    session.state = "choosing_project";
+
+    try {
+      await bot.sendMessage(chatId, "ممنون 🙏 شماره‌تون ثبت شد.", { reply_markup: { remove_keyboard: true } });
+      const welcome = await getWelcomeMessage();
+      await reply(bot, chatId, welcome);
+    } catch (err) {
+      console.error("❌ خطا بعد از دریافت مخاطب:", err.message || err);
+    }
   });
 
   bot.on("message", async (msg) => {
     if (!isUsableChat(msg)) return;
+    if (msg.contact) return; // در هندلر «contact» پردازش شد
     if (/^\/(start|restart)(@\w+)?/i.test(msg.text || "")) return; // در هندلر بالا پردازش شد
     if (/^\/[a-z]/i.test(msg.text || "")) return; // بقیهٔ دستورات تلگرام را نادیده می‌گیریم
 
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+    const session = getSession(key);
+
+    // اگر شماره هنوز گرفته نشده، هر پیامی که کاربر بفرستد را نادیده بگیر و دوباره دکمه را نشان بده
+    if (!hasContact(session)) {
+      await askForContact(bot, chatId);
+      return;
+    }
+
     if (!msg.text) {
       try {
-        await bot.sendMessage(msg.chat.id, "لطفاً اطلاعات فایل رو به‌صورت متن بنویسید 🙏");
+        await bot.sendMessage(chatId, "لطفاً اطلاعات فایل رو به‌صورت متن بنویسید 🙏");
       } catch {
         /* ignore */
       }
@@ -135,7 +203,6 @@ export function startTelegramBot() {
 
   bot.on("polling_error", (err) => {
     const message = err?.message || String(err);
-    // خطای 409 یعنی یک نمونهٔ دیگر از بات هم‌زمان polling می‌کند
     if (/409|conflict/i.test(message)) {
       console.error("❌ خطای 409 تلگرام: یک نمونهٔ دیگر از همین بات در حال اجراست. فقط یک instance فعال نگه دارید.");
       return;
@@ -143,7 +210,6 @@ export function startTelegramBot() {
     console.error("خطای polling تلگرام:", message);
   });
 
-  // بدون این هندلر، هر رویداد «error» می‌تواند پروسه را بیندازد
   bot.on("error", (err) => console.error("❌ خطای عمومی بات تلگرام:", err?.message || err));
 
   bot.getMe()
