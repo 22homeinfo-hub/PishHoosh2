@@ -89,7 +89,9 @@ export async function getActiveProjects() {
         .split(",")
         .map((f) => f.trim())
         .filter(Boolean),
-      pricePerMeter: Number(row.get("قیمت پایه هر متر (تومان)") || 0),
+      pricePerMeter: row.get("قیمت پایه هر متر (تومان)")
+        ? Number(row.get("قیمت پایه هر متر (تومان)"))
+        : null,
       notes: (row.get("توضیحات کمکی برای AI") || "").trim(),
       active: (row.get("فعال؟") || "").trim() === "بله",
     }))
