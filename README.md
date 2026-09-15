@@ -125,14 +125,50 @@ npm start
 
 ---
 
-## ۵) دیپلوی روی Railway
+## ۵) دیپلوی و اتصال به بات تلگرام
 
-1. ریپو را در GitHub بگذارید و در https://railway.app با **Deploy from GitHub repo** وارد کنید.
-2. در تب **Variables** همهٔ مقادیر `.env` را دستی وارد کنید (Railway فایل `.env` را نمی‌خواند).
-   در `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` حتماً `\n`ها را نگه دارید.
-3. `CORS_ORIGIN` را روی دامنهٔ سایت خود تنظیم کنید.
-4. سرویس را **یک instance** نگه دارید: بات با polling کار می‌کند و دو نمونهٔ همزمان
-   خطای 409 تلگرام می‌گیرند. به همین دلیل نشست‌ها هم در حافظه‌اند و با restart پاک می‌شوند.
+فایل `railway.json` داخل ریپو همهٔ تنظیمات حساس را خودش اعمال می‌کند:
+**یک instance** (دو نمونهٔ همزمان = خطای 409 و جواب تکراری)، **بدون هم‌پوشانی دیپلوی**
+(`overlapSeconds: 0` تا هنگام دیپلوی جدید، نمونهٔ قدیمی همچنان polling نکند)،
+**healthcheck روی `/health`** و **خاموش‌نشدن در زمان بی‌کاری**.
+
+مراحل:
+
+1. ریپو را در https://railway.app با **New Project → Deploy from GitHub repo** وارد کنید
+   (می‌توانید برنچ `arena/01a0a539-pishhoosh` را انتخاب کنید یا بعد از مرج به `main` دیپلوی کنید).
+2. در تب **Variables** این‌ها را وارد کنید (Railway فایل `.env` را نمی‌خواند):
+   `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_SHEET_ID`,
+   `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`,
+   `ADMIN_CHAT_ID`, `CORS_ORIGIN`.
+   در کلید خصوصی حتماً `\n`ها را نگه دارید.
+3. دیپلوی کنید و در لاگ‌ها این دو خط را ببینید:
+   ```
+   ✅ بات تلگرام فعال شد: @your_bot
+   ✅ 2 پروژهٔ فعال از گوگل‌شیت خوانده شد
+   ```
+4. در تلگرام `/start` بزنید.
+
+**اگر قبلاً برای این بات webhook ست کرده بودید**، polling کار نمی‌کند و در لاگ خطای 409 می‌بینید.
+یک‌بار این را صدا بزنید (در مرورگر هم باز می‌شود):
+
+```
+https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/deleteWebhook
+```
+
+`npm run doctor` هم همین را چک می‌کند: معتبر بودن توکن با `getMe`، نام بات، و فعال‌بودن webhook.
+
+### اجرای محلی (ساده‌ترین راه برای تست)
+
+```bash
+git clone https://github.com/GameOver2032/PishHoosh.git
+cd PishHoosh
+npm install
+cp .env.example .env      # سپس مقادیر واقعی را بگذارید
+npm run doctor            # باید «🎉 همه‌چیز سالم است» بدهد
+npm start
+```
+
+> ⚠️ بات را هم‌زمان روی لپ‌تاپ و Railway اجرا نکنید؛ فقط یک نمونه می‌تواند polling کند.
 
 ---
 

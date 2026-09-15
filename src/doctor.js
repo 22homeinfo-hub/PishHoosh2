@@ -75,8 +75,51 @@ async function checkGemini() {
   }
 }
 
+async function checkTelegram() {
+  console.log("\n── ۳) توکن تلگرام ────────────────────────────────────");
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) {
+    warn("TELEGRAM_BOT_TOKEN تنظیم نشده", "بات تلگرام بالا نمی‌آید (فقط API وب)");
+    return;
+  }
+  if (!/^\d{5,}:.+/.test(token)) {
+    fail("قالب توکن تلگرام درست نیست", "توکن باید چیزی شبیه «123456789:AA...» باشد");
+    return;
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const data = await res.json();
+    if (data?.ok) {
+      ok(`توکن معتبر است`, `بات: @${data.result.username} (شناسهٔ ${data.result.id})`);
+      // اگر بات قبلاً webhook داشته باشد، polling کار نمی‌کند
+      const hook = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+      const hookData = await hook.json();
+      const url = hookData?.result?.url;
+      if (url) {
+        fail("برای این بات webhook فعال است", `آدرس: ${url}`);
+        console.log("   → چون ربات با polling کار می‌کند، باید webhook را حذف کنید:");
+        console.log(`     curl "https://api.telegram.org/bot<TOKEN>/deleteWebhook"`);
+        console.log("     (یا در مرورگر همان آدرس را باز کنید)");
+      } else {
+        ok("webhook فعال نیست", "polling بدون تداخل کار می‌کند");
+      }
+    } else {
+      fail("تلگرام توکن را نپذیرفت", data?.description || `کد ${res.status}`);
+      console.log("   → توکن را از BotFather دوباره بگیرید یا با /revoke قبلی را باطل نکنید.");
+    }
+  } catch (err) {
+    fail("ارتباط با api.telegram.org برقرار نشد", err.message);
+    console.log("   → اگر روی سرور داخلی هستید، دسترسی خروجی به api.telegram.org را باز کنید.");
+  }
+
+  const admin = process.env.ADMIN_CHAT_ID?.trim();
+  if (admin && !/^-?\d{5,}$/.test(admin)) {
+    warn("ADMIN_CHAT_ID عددی نیست", "باید شناسهٔ عددی چتلد باشد (از @userinfobot)");
+  }
+}
+
 async function checkSheets() {
-  console.log("\n── ۳) اتصال به گوگل‌شیت ──────────────────────────────");
+  console.log("\n── ۴) اتصال به گوگل‌شیت ──────────────────────────────");
   let report;
   try {
     report = await describeSheets();
@@ -105,7 +148,7 @@ async function checkSheets() {
 }
 
 async function checkProjects() {
-  console.log("\n── ۴) پروژه‌های فعال ─────────────────────────────────");
+  console.log("\n── ۵) پروژه‌های فعال ─────────────────────────────────");
   let projects;
   try {
     projects = await getActiveProjects({ force: true });
@@ -174,6 +217,7 @@ async function main() {
   console.log(`   نسخهٔ نود: ${process.version}`);
   await checkEnv();
   await checkGemini();
+  await checkTelegram();
   await checkSheets();
   await checkProjects();
   summary();
