@@ -10,6 +10,10 @@
 // ۴) نوشتن لید فقط با هدرهای «موجود» در شیت انجام می‌شود و اگر ستون حیاتی نباشد، خطای روشن می‌دهد.
 //    قبلاً addRow ستون ناشناخته را بی‌صدا دور می‌ریخت.
 // ۵) به‌روزرسانی همان ردیف لید امکان‌پذیر است (برای اصلاح شماره/نام بعد از پایان مکالمه).
+// ۶) [رفع باگ] getTab صریحاً sheet.loadHeaderRow() را صدا می‌زند. قبلاً فقط sheet.headerValues
+//    خوانده می‌شد که هدر را برای resolveHeaders کافی نشان می‌داد، اما چون خودِ متد loadHeaderRow
+//    هرگز اجرا نمی‌شد، اولین فراخوانی addRow با خطای "Header values are not yet loaded" شکست
+//    می‌خورد (چون این کتابخانه پیش از نوشتن، به‌طور جدا header را لود شده می‌خواهد).
 
 import "./env.js";
 import { GoogleSpreadsheet } from "google-spreadsheet";
@@ -21,7 +25,6 @@ const PROJECTS_TAB = (process.env.PROJECTS_SHEET_TITLE || "Projects").trim();
 const LEADS_TAB = (process.env.LEADS_SHEET_TITLE || "Leads").trim();
 const CACHE_TTL_MS = Number(process.env.SHEET_CACHE_TTL_MS) || 2 * 60 * 1000;
 
-// نام‌های قابل قبول برای هر ستون (اولین مورد، اولویت دارد)
 const PROJECT_HEADERS = {
   name: ["نام پروژه", "پروژه", "project name", "name"],
   fields: ["فیلدهای موردنیاز", "فیلدها", "سوالات", "fields"],
@@ -81,7 +84,6 @@ async function createDoc() {
   return doc;
 }
 
-// ترجمهٔ خطاهای رایج اتصال به پیامی که واقعاً بگوید مشکل کجاست
 function friendlySheetsError(err) {
   const message = String(err?.message ?? err);
   const status = err?.response?.status;
@@ -102,7 +104,6 @@ function friendlySheetsError(err) {
   return message;
 }
 
-// بارگذاری با قفل: درخواست‌های همزمان، چند بار loadInfo نمی‌زنند
 export function getDoc({ force = false } = {}) {
   if (force || !docPromise) {
     docPromise = createDoc().catch((err) => {
@@ -120,17 +121,19 @@ async function getTab(title, { reload = false } = {}) {
   const doc = await getDoc({ force: reload });
   let sheet = doc.sheetsByTitle[title];
   if (!sheet && !reload) {
-    // ممکن است تب تازه ساخته شده باشد؛ یک‌بار اطلاعات را تازه می‌کنیم
     return getTab(title, { reload: true });
   }
   if (!sheet) {
     const available = Object.keys(doc.sheetsByTitle).join("، ");
     throw new Error(`تب «${title}» در گوگل‌شیت پیدا نشد. تب‌های موجود: ${available || "(هیچ)"}`);
   }
+  // رفع باگ: بدون این فراخوانی صریح، sheet.headerValues برای خواندن هدر کافی است
+  // اما خود کتابخانه هنوز هدر را "لود‌شده" نمی‌داند و addRow با خطای
+  // "Header values are not yet loaded" شکست می‌خورد.
+  await sheet.loadHeaderRow();
   return sheet;
 }
 
-// نگاشت هدرهای واقعی شیت به کلیدهای منطقی، با تحمل اختلاف نگارش
 export function resolveHeaders(headerValues, mapping) {
   const headers = (headerValues || []).filter(Boolean).map((raw) => ({ raw, norm: normalizeHeader(raw) }));
   const claimed = new Set();
@@ -163,15 +166,13 @@ const FALSE_WORDS = ["نه", "خیر", "غیرفعال", "غیر فعال", "no"
 
 function parseActive(value) {
   const text = normalizeForMatch(value);
-  if (!text) return true; // خالی = فعال (با هشدار در doctor)
+  if (!text) return true;
   if (TRUE_WORDS.some((w) => text === normalizeForMatch(w))) return true;
   if (FALSE_WORDS.some((w) => text === normalizeForMatch(w))) return false;
-  // اگر ستون بولین شیت TRUE/FALSE باشد
   if (typeof value === "boolean") return value;
   return true;
 }
 
-// تاریخ تهران در قالب شمسیِ مرتب‌شدنی: 1405/06/24 16:30
 function persianDateTime(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-u-ca-persian", {
     timeZone: "Asia/Tehran",
@@ -201,10 +202,6 @@ function gregorianDateTime(date = new Date()) {
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }
 
-/**
- * خواندن پروژه‌های فعال از شیت.
- * همیشه آرایه برمی‌گرداند؛ مشکلات هر ردیف در warnings لاگ می‌شود (نه اینکه بی‌صدا رد شود).
- */
 export async function getActiveProjects({ force = false } = {}) {
   const now = Date.now();
   if (!force && projectsCache && now - projectsCacheTime < CACHE_TTL_MS) return projectsCache;
@@ -268,8 +265,6 @@ export function invalidateProjectsCache() {
   projectsCacheTime = 0;
 }
 
-// یافتن پروژه با نام، شمارهٔ لیست، یا شباهت نسبی
-// (منطق تطبیق در projects.js است تا هم اینجا و هم در تست‌ها یکسان باشد)
 export async function findProject(input) {
   const projects = await getActiveProjects();
   return matchProject(projects, input);
@@ -310,10 +305,6 @@ function buildLeadRow(resolved, lead) {
   return values;
 }
 
-/**
- * ثبت لید جدید. شماره ردیف را برمی‌گرداند تا بعداً بتوان همان ردیف را اصلاح کرد.
- * اگر نوشتن ناموفق باشد خطا پرتاب می‌شود (تا به کاربر دروغ «ثبت شد» نگوییم).
- */
 export async function addLead(lead) {
   const { sheet, resolved } = await getLeadsSheet();
   const values = buildLeadRow(resolved, lead);
@@ -321,9 +312,6 @@ export async function addLead(lead) {
   return { rowNumber: row.rowNumber };
 }
 
-/**
- * به‌روزرسانی همان ردیف لید (مثلاً وقتی کاربر بعد از پایان مکالمه شماره‌اش را اصلاح می‌کند).
- */
 export async function updateLead(rowNumber, patch) {
   if (!rowNumber) throw new Error("شماره ردیف لید برای به‌روزرسانی موجود نیست.");
   const { sheet, resolved } = leadsHeaderCache ?? (await getLeadsSheet());
@@ -339,7 +327,6 @@ export async function updateLead(rowNumber, patch) {
   return { rowNumber };
 }
 
-// اطلاعات تشخیصی برای npm run doctor
 export async function describeSheets() {
   const doc = await getDoc({ force: true });
   const report = { tabs: Object.keys(doc.sheetsByTitle), projects: null, leads: null };
