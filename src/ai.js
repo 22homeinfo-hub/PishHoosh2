@@ -5,8 +5,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
+const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 // می‌سازد system prompt مخصوص یک پروژه خاص، شامل فیلدهایی که باید پرسیده شود
 function buildSystemPrompt(project) {
   return `تو یک دستیار هوشمند دفتر املاک "دیار" هستی. وظیفه‌ات اینه که با کاربر به فارسی و محاوره‌ای، مودبانه و دوستانه صحبت کنی.
