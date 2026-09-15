@@ -1,103 +1,262 @@
-// ماژول هوش مصنوعی (Gemini): مدیریت مکالمه + تخمین قیمت
+// ماژول هوش مصنوعی (Gemini)
+//
+// تغییرات کلیدی نسبت به نسخه قبلی:
+// ۱) مهاجرت از پکیج deprecated «@google/generative-ai» به SDK رسمی «@google/genai».
+// ۲) استفاده از systemInstruction واقعی به‌جای جا زدن prompt در نقش «کاربر».
+// ۳) حذف temperature (در gemini-3.6-flash به بعد نادیده گرفته می‌شود) و استفاده از thinkingLevel.
+// ۴) به‌جای ۳ درخواست برای هر پیام کاربر (پاسخ + تشخیص پایان + استخراج JSON)،
+//    حالا فقط «یک» درخواست می‌زنیم و مدل هم‌زمان پاسخ، وضعیت پایان و اطلاعات لید را
+//    در قالب JSON ساخت‌یافته (structured output) برمی‌گرداند.
+//    این کار هزینه/تأخیر را یک‌سوم می‌کند و تاریخچه مکالمه را از پیام‌های متا پاک نگه می‌دارد.
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import dotenv from "dotenv";
-dotenv.config();
+import "./env.js";
+import { GoogleGenAI } from "@google/genai";
+import { formatToman } from "./text.js";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+const VALID_THINKING_LEVELS = ["minimal", "low", "medium", "high"];
+const REQUESTED_LEVEL = (process.env.GEMINI_THINKING_LEVEL?.trim() || "low").toLowerCase();
+const THINKING_LEVEL = VALID_THINKING_LEVELS.includes(REQUESTED_LEVEL) ? REQUESTED_LEVEL : "low";
 
-// می‌سازد system prompt مخصوص یک پروژه خاص، شامل فیلدهایی که باید پرسیده شود
-function buildSystemPrompt(project) {
-  const priceLine = project.pricePerMeter
-    ? `قیمت پایه هر متر: ${project.pricePerMeter.toLocaleString("fa-IR")} تومان`
-    : "قیمت پایه هر متر مشخص نشده - فرمول قیمت‌گذاری کامل توی توضیحات زیره، از همون استفاده کن.";
+let client = null;
+function getClient() {
+  if (!client) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new AiError("GEMINI_API_KEY تنظیم نشده است.", "سرویس هوش مصنوعی فعال نیست. لطفاً با پشتیبانی تماس بگیرید.", false);
+    }
+    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return client;
+}
 
-  return `تو "پیش‌هوش" هستی، دستیار هوشمند تخصصی قیمت‌گذاری پروژه‌های پیش‌خرید ملک. فارسی، محاوره‌ای و مودب صحبت کن.
+// خطایی که هم پیام فنی دارد (برای لاگ) و هم پیام کاربری (برای نمایش به مشتری)
+export class AiError extends Error {
+  constructor(message, userMessage = "متاسفانه خطایی پیش اومد. لطفاً دوباره امتحان کنید.", retryable = true, cause = null) {
+    super(message);
+    this.name = "AiError";
+    this.userMessage = userMessage;
+    this.retryable = retryable;
+    if (cause) this.cause = cause;
+  }
+}
 
-کاربر داره اطلاعات فایلش رو برای پروژه "${project.name}" ثبت می‌کنه.
+// اسکیمای خروجی ساخت‌یافته: مدل همیشه در این قالب جواب می‌دهد
+const RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: {
+      type: "string",
+      description: "متن کامل و نهایی پیامی که عیناً به کاربر نمایش داده می‌شود (فارسی، بدون JSON، بدون مارک‌داون).",
+    },
+    done: {
+      type: "boolean",
+      description:
+        "فقط وقتی true که تمام فیلدهای فایل گرفته شده، قیمت تخمینی اعلام شده و نام و شماره تماس کاربر هم گرفته شده باشد.",
+    },
+    lead: {
+      type: "object",
+      nullable: true,
+      description: "فقط وقتی done=true پر شود؛ در غیر این صورت null.",
+      properties: {
+        customerName: { type: "string", description: "نام و نام خانوادگی مشتری" },
+        phone: { type: "string", description: "شماره تماس مشتری، فقط رقم‌ها" },
+        fileInfo: { type: "string", description: "خلاصه یک‌خطی و کامل از همه اطلاعات فایل، با جداکننده «،»" },
+        estimatedPrice: { type: "number", description: "قیمت تخمینی کل به تومان، فقط عدد بدون واحد و بدون جداکننده" },
+      },
+    },
+  },
+  required: ["reply", "done"],
+  propertyOrdering: ["reply", "done", "lead"],
+};
 
-فیلدهایی که باید یکی‌یکی بپرسی:
-${project.fields.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+function buildSystemInstruction(project) {
+  const fields = project.fields?.length ? project.fields : ["مشخصات کلی فایل"];
+  const priceLine =
+    project.pricePerMeter !== null && project.pricePerMeter !== undefined
+      ? `قیمت پایه هر متر: ${formatToman(project.pricePerMeter)} (این عدد قطعی و معتبر است).`
+      : "قیمت پایه هر متر در شیت ثبت نشده؛ فقط از فرمول/اعداد موجود در توضیحات زیر استفاده کن و اگر عددی نبود، از کاربر بپرس یا بگو کارشناس اعلام می‌کند. هرگز قیمت را از خودت اختراع نکن.";
 
-توضیحات و قوانین قیمت‌گذاری این پروژه (این قوانین رو دقیق و کامل رعایت کن؛ فقط از همین اطلاعات برای محاسبه استفاده کن، چیزی از خودت اضافه نکن):
-${project.notes || "توضیح خاصی ثبت نشده"}
+  return `تو «پیش‌هوش» هستی، دستیار تخصصی قیمت‌گذاری پروژه‌های پیش‌خرید ملک برای دفتر املاک دیار.
+فارسی، محاوره‌ای، مودب و شمرده صحبت کن.
+
+کاربر در حال ثبت اطلاعات فایل خودش برای پروژه «${project.name}» است.
+
+فیلدهایی که باید به‌ترتیب و یکی‌یکی بپرسی:
+${fields.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+
+توضیحات و قوانین قیمت‌گذاری این پروژه (فقط از همین اطلاعات استفاده کن و چیزی از خودت اضافه نکن):
+${project.notes || "توضیح خاصی ثبت نشده."}
 
 ${priceLine}
 
-قوانین سبک نوشتن:
-- جمله‌هات همیشه کامل و قابل‌فهم باشه، هرگز تک‌کلمه یا نصفه‌ولا جواب نده.
-- مختصر و کاربردی بنویس ولی هر چقدر لازمه توضیح بده - کوتاهی نباید به قیمت گنگ و نامفهوم شدن جواب تموم بشه.
-- در هر پیام یک سوال روشن و کامل بپرس.
+قوانین پاسخ‌دهی:
+- در هر پیام فقط «یک» سوال روشن و کامل بپرس.
+- جمله‌ها کامل و قابل‌فهم باشند؛ هیچ‌وقت تک‌کلمه یا نصفه‌ولا جواب نده.
+- مختصر بنویس اما به قیمت گنگ شدن جواب، چیزی را حذف نکن.
+- اگر کاربر عدد یا اطلاعات نامعتبر داد (مثلاً متراژ صفر)، مؤدبانه اصلاحش را بخواه.
+- اگر کاربر سوال بی‌ربط پرسید، کوتاه و مؤدبانه او را به مسیر ثبت فایل برگردان.
 - ایموجی کم و به‌جا استفاده کن.
+- هرگز اطلاعاتی که کاربر نگفته را حدس نزن یا جای خالی پر نکن.
 
-قوانین محتوا:
-- وقتی همه فیلدها رو گرفتی، دقیقاً طبق فرمول قیمت‌گذاری بالا محاسبه کن و قیمت تخمینی رو با عدد دقیق اعلام کن، همراه با توضیح کوتاه چطور محاسبه شد.
-- بگو این تخمین اولیه است و کارشناس دیار تماس می‌گیره.
-- در پایان، نام و شماره تماس کاربر رو هم بپرس (اگر نگفته).
-- هرگز قیمت رو صد در صد قطعی و نهایی اعلام نکن.
-- اگه کاربر سوال بی‌ربط پرسید، مودبانه به مسیر اصلی برش گردون.`;
+قوانین پایان مکالمه:
+- وقتی همه فیلدها را گرفتی، دقیقاً طبق قوانین قیمت‌گذاری بالا محاسبه کن و قیمت تخمینی را با عدد دقیق اعلام کن و کوتاه بگو چطور محاسبه شد.
+- سپس نام و شماره تماس کاربر را بپرس (اگر نگرفته‌ای).
+- همیشه بگو این تخمین «اولیه» است و کارشناس دفتر دیار برای بررسی نهایی تماس می‌گیرد.
+- هیچ‌وقت قیمت را صددرصد قطعی و نهایی اعلام نکن.
+
+قالب خروجی (بسیار مهم):
+خروجی تو همیشه یک JSON معتبر با این ساختار است و هیچ چیز دیگری:
+{"reply": "متنی که کاربر می‌بیند", "done": false, "lead": null}
+- فیلد reply تنها جایی است که متن مکالمه می‌رود؛ داخلش JSON یا بک‌تیک نگذار.
+- done فقط زمانی true است که همه فیلدها + نام + شماره تماس گرفته شده و قیمت هم اعلام شده باشد.
+- وقتی done=true است، lead را با customerName و phone و fileInfo و estimatedPrice (عدد به تومان) پر کن.
+
+بعد از پایان مکالمه:
+- اگر کاربر سوالی پرسید یا اطلاعاتی را اصلاح کرد (مثلاً شمارهٔ اشتباه را درست کرد)، کمکش کن و در همان JSON، lead اصلاح‌شده را با done=true برگردان.
+- اگر کاربر خواست فایل جدیدی ثبت کند، او را راهنمایی کن که «شروع مجدد» را بفرستد.`;
 }
 
-// شروع یک مکالمه جدید برای یک پروژه خاص
+// ساخت سلام اولیه بدون مصرف سهمیه API
+function buildGreeting(project) {
+  const firstField = project.fields?.[0] || "مشخصات کلی فایلتون";
+  return `سلام 🌷 من پیش‌هوش هستم، دستیار هوشمند دفتر املاک دیار.\nبرای پروژه «${project.name}» شروع می‌کنیم.\n\nلطفاً ${firstField} رو بگید؟`;
+}
+
+/**
+ * شروع یک مکالمه جدید برای یک پروژه.
+ * خروجی: { chat, greeting, project }
+ * سلام اولیه در history «کاشته» می‌شود تا بدون هزینه API، مدل بداند چه چیزی پرسیده است.
+ * (نکته: چون همیشه یک پیام کاربر بعد از آن می‌آید، آخرین turn هرگز model نیست.)
+ */
 export function startConversation(project) {
-  return model.startChat({
-    history: [
-      {
-        role: "user",
-        parts: [{ text: buildSystemPrompt(project) }],
-      },
-      {
-        role: "model",
-        parts: [
-          {
-            text: `سلام 🌷 من پیش‌هوش هستم. برای پروژه "${project.name}" شروع می‌کنیم. ${project.fields[0]} رو بگید؟`,
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.6,
-    },
-  });
-}
-
-// ارسال پیام کاربر به مکالمه فعال و گرفتن پاسخ
-export async function sendMessage(chatSession, userText) {
-  const result = await chatSession.sendMessage(userText);
-  return result.response.text();
-}
-
-// تشخیص اینکه آیا مکالمه به مرحله "تخمین قیمت نهایی داده شد" رسیده یا نه
-// از خود مدل می‌خوایم که این تشخیص رو با یک پیام جدا بده (ساده و قابل اعتماد)
-export async function checkIfComplete(chatSession) {
-  const probe = `فقط با یک کلمه جواب بده: اگه در این مکالمه، همه اطلاعات فایل + نام و شماره تماس کاربر گرفته شده و قیمت تخمینی هم اعلام شده، بنویس "COMPLETE". در غیر این صورت بنویس "CONTINUE".`;
-  const result = await chatSession.sendMessage(probe);
-  const text = result.response.text().trim();
-  return text.includes("COMPLETE");
-}
-
-// استخراج ساخت‌یافته اطلاعات لید از تاریخچه مکالمه (برای ثبت در شیت)
-export async function extractLeadData(chatSession, project) {
-  const prompt = `بر اساس کل این مکالمه، فقط یک JSON خام (بدون توضیح، بدون Markdown، بدون بک‌تیک) با این ساختار دقیق برگردون:
-{
-  "customerName": "نام مشتری یا خالی",
-  "phone": "شماره تماس یا خالی",
-  "fileInfo": "خلاصه‌ای یک‌خطی از تمام اطلاعات فایل که کاربر گفته (${project.fields.join("، ")})",
-  "estimatedPrice": "قیمت تخمینی که اعلام کردی، فقط عدد و واحد تومان، یا خالی"
-}`;
-  const result = await chatSession.sendMessage(prompt);
-  let text = result.response.text().trim();
-  text = text.replace(/```json|```/g, "").trim();
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("خطا در پارس کردن JSON خروجی AI:", text);
-    return {
-      customerName: "",
-      phone: "",
-      fileInfo: "خطا در استخراج خودکار - لطفا مکالمه رو دستی چک کنید",
-      estimatedPrice: "",
-    };
+  if (!project) throw new AiError("پروژه‌ای برای شروع مکالمه داده نشده.", "پروژه پیدا نشد.", false);
+  if (!Array.isArray(project.fields) || project.fields.length === 0) {
+    throw new AiError(
+      `پروژه «${project.name}» هیچ فیلدی در ستون «فیلدهای موردنیاز» ندارد.`,
+      "برای این پروژه هنوز فیلدهای لازم در سیستم تعریف نشده. لطفاً با دفتر دیار تماس بگیرید.",
+      false
+    );
   }
+
+  const greeting = buildGreeting(project);
+  const chat = getClient().chats.create({
+    model: MODEL,
+    config: {
+      systemInstruction: buildSystemInstruction(project),
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+      thinkingConfig: { thinkingLevel: THINKING_LEVEL.toUpperCase() },
+    },
+    history: [
+      { role: "user", parts: [{ text: `سلام، می‌خوام اطلاعات فایلم رو برای پروژه «${project.name}» ثبت کنم.` }] },
+      { role: "model", parts: [{ text: JSON.stringify({ reply: greeting, done: false, lead: null }) }] },
+    ],
+  });
+
+  return { chat, greeting, project };
 }
+
+// استخراج متن از پاسخ، حتی وقتی candidate خالی یا بلاک شده است
+function extractRawText(response) {
+  const candidate = response?.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  const text = parts
+    .filter((p) => typeof p?.text === "string" && !p?.thought)
+    .map((p) => p.text)
+    .join("")
+    .trim();
+  if (text) return text;
+
+  const blockReason = response?.promptFeedback?.blockReason;
+  const finishReason = candidate?.finishReason;
+  if (blockReason) throw new AiError(`پاسخ مدل بلاک شد: ${blockReason}`, "متاسفانه این پیام پردازش نشد. لطفاً جمله‌بندی رو تغییر بدید.", true);
+  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+    throw new AiError(`پاسخ مدل ناقص بود: ${finishReason}`, "متاسفانه پاسخ کامل تولید نشد. لطفاً دوباره امتحان کنید.", true);
+  }
+  return "";
+}
+
+// پارس مقاوم JSON (اگر مدل احیاناً توضیح یا بک‌تیک اضافه کرد هم کار کند)
+function parseModelJson(raw) {
+  if (!raw) return null;
+  const candidates = [raw, raw.replace(/```json|```/gi, "").trim()];
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      // ادامه به نامزد بعدی
+    }
+  }
+  return null;
+}
+
+function classifyError(err) {
+  const message = String(err?.message ?? err);
+  if (/\b(429|RESOURCE_EXHAUSTED|quota|rate limit)/i.test(message)) {
+    return new AiError(message, "سرویس فعلاً شلوغه 🙏 لطفاً یک دقیقه دیگه دوباره امتحان کنید.", true, err);
+  }
+  if (/\b(400|INVALID_ARGUMENT)\b/.test(message) && /model/i.test(message)) {
+    return new AiError(message, "مدل هوش مصنوعی درست تنظیم نشده. لطفاً به پشتیبانی اطلاع بدید.", false, err);
+  }
+  if (/\b(401|403|API_KEY_INVALID|PERMISSION_DENIED)\b/.test(message)) {
+    return new AiError(message, "سرویس هوش مصنوعی فعلاً در دسترس نیست. لطفاً به پشتیبانی اطلاع بدید.", false, err);
+  }
+  return new AiError(message, "متاسفانه خطایی پیش اومد 🙏 لطفاً دوباره امتحان کنید.", true, err);
+}
+
+/**
+ * ارسال پیام کاربر و گرفتن پاسخ ساخت‌یافته.
+ * خروجی: { reply, done, lead, raw }
+ */
+export async function sendTurn(chat, userText) {
+  let response;
+  try {
+    response = await chat.sendMessage({ message: String(userText) });
+  } catch (err) {
+    throw classifyError(err);
+  }
+
+  const raw = extractRawText(response);
+  const parsed = parseModelJson(raw);
+
+  // اگر مدل به هر دلیلی JSON نداد، همان متن را به‌عنوان پاسخ نشان می‌دهیم
+  if (!parsed) {
+    const fallback = raw || "متاسفانه پاسخی تولید نشد. لطفاً دوباره امتحان کنید.";
+    return { reply: fallback, done: false, lead: null, raw };
+  }
+
+  const reply = typeof parsed.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : "";
+  const lead =
+    parsed.lead && typeof parsed.lead === "object"
+      ? {
+          customerName: String(parsed.lead.customerName ?? "").trim(),
+          phone: String(parsed.lead.phone ?? "").trim(),
+          fileInfo: String(parsed.lead.fileInfo ?? "").trim(),
+          estimatedPrice: parsed.lead.estimatedPrice ?? "",
+        }
+      : null;
+
+  return {
+    reply: reply || "متاسفانه پاسخی تولید نشد. لطفاً دوباره امتحان کنید.",
+    done: parsed.done === true,
+    lead,
+    raw,
+  };
+}
+
+// فقط برای ابزار تشخیص (npm run doctor): یک درخواست کوچک برای سنجش سلامت کلید و مدل
+export async function pingModel() {
+  const res = await getClient().models.generateContent({
+    model: MODEL,
+    contents: "فقط کلمه OK را برگردان.",
+    config: { maxOutputTokens: 64, thinkingConfig: { thinkingLevel: THINKING_LEVEL.toUpperCase() } },
+  });
+  return { model: MODEL, thinkingLevel: THINKING_LEVEL, text: (res.text ?? "").trim().slice(0, 40) };
+}
+
+export const aiConfig = { model: MODEL, thinkingLevel: THINKING_LEVEL };

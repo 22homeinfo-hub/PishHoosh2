@@ -1,34 +1,85 @@
 // مدیریت نشست (session) هر کاربر در حافظه
-// هر کاربر (چه تلگرام چه وب) یک session دارد که شامل:
+// هر کاربر (تلگرام یا وب) یک session دارد شامل:
 // - پروژه انتخابی
-// - مکالمه فعال با Gemini
-// - وضعیت (در حال انتخاب پروژه / در حال گفتگو / پایان یافته)
+// - شیء Chat فعال با Gemini
+// - وضعیت مکالمه
+// - شماره ردیف لید ثبت‌شده در شیت (برای اصلاح بعدی)
+//
+// تغییرات نسبت به نسخه قبل:
+// ۱) زمان «آخرین فعالیت» نگه داشته می‌شود؛ قبلاً پاک‌سازی بر اساس زمان ساخت بود و
+//    یک مکالمهٔ در جریان بعد از ۲ ساعت وسط کار حذف می‌شد.
+// ۲) تایمر پاک‌سازی unref شده تا جلوی خروج طبیعی پروسه را نگیرد.
+// ۳) یک قفل ساده برای هر کاربر هست تا پیام‌های پشت‌سرهم به‌صورت موازی پردازش نشوند
+//    و ترتیب تاریخچهٔ مکالمه به هم نریزد.
+//
+// توجه: این داده‌ها فقط در حافظه‌اند؛ با restart شدن سرویس همه مکالمه‌های نیمه‌تمام پاک می‌شوند.
+// اگر سرویس را بیش از یک instance مقیاس می‌دهید، باید از Redis یا دیتابیس استفاده کنید.
 
 const sessions = new Map();
+const locks = new Map();
 
-// کلید یکتا برای هر کاربر: مثلا "telegram:12345" یا "web:uuid-xxx"
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MINUTES || 120) * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
+
+function newSession() {
+  const now = Date.now();
+  return {
+    state: "choosing_project", // choosing_project | chatting | followup
+    project: null,
+    chat: null,
+    leadRowNumber: null,
+    savedLead: null,
+    createdAt: now,
+    lastActivityAt: now,
+  };
+}
+
 export function getSession(key) {
-  if (!sessions.has(key)) {
-    sessions.set(key, {
-      state: "choosing_project", // choosing_project | chatting | done
-      project: null,
-      chatSession: null,
-      createdAt: Date.now(),
-    });
+  let session = sessions.get(key);
+  if (!session) {
+    session = newSession();
+    sessions.set(key, session);
   }
-  return sessions.get(key);
+  session.lastActivityAt = Date.now();
+  return session;
 }
 
 export function resetSession(key) {
   sessions.delete(key);
 }
 
-// پاکسازی خودکار نشست‌های قدیمی‌تر از ۲ ساعت (جلوگیری از نشتی حافظه)
-setInterval(() => {
-  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+// اجرای تابع به‌صورت سریالی برای هر کاربر (جلوگیری از پردازش موازی پیام‌ها)
+export function withSessionLock(key, fn) {
+  const previous = locks.get(key) ?? Promise.resolve();
+  const run = previous.then(() => fn(), () => fn());
+  const tail = run.then(
+    () => {},
+    () => {}
+  );
+  locks.set(key, tail);
+  tail.then(() => {
+    if (locks.get(key) === tail) locks.delete(key);
+  });
+  return run;
+}
+
+export function sessionStats() {
+  const byState = {};
+  for (const session of sessions.values()) byState[session.state] = (byState[session.state] ?? 0) + 1;
+  return { total: sessions.size, byState };
+}
+
+const cleanupTimer = setInterval(() => {
+  const cutoff = Date.now() - SESSION_TTL_MS;
+  let removed = 0;
   for (const [key, session] of sessions.entries()) {
-    if (session.createdAt < twoHoursAgo) {
+    if ((session.lastActivityAt ?? session.createdAt) < cutoff) {
       sessions.delete(key);
+      removed++;
     }
   }
-}, 30 * 60 * 1000);
+  if (removed) console.log(`🧹 ${removed} نشست قدیمی پاک شد. نشست‌های فعال: ${sessions.size}`);
+}, CLEANUP_INTERVAL_MS);
+
+// اجازه می‌دهد پروسه بدون منتظر ماندن برای این تایمر خارج شود
+cleanupTimer.unref?.();

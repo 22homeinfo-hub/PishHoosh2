@@ -1,0 +1,30 @@
+# متغیرهای محیطی - هرگز commit نشوند
+.env
+.env.local
+.env.*.local
+
+# کلیدهای سرویس‌اکانت گوگل (اگر فایل JSON را کنار پروژه نگه می‌دارید)
+*service*account*.json
+*.pem
+*.p12
+credentials.json
+
+# وابستگی‌ها و خروجی‌ها
+node_modules/
+npm-debug.log*
+yarn-error.log*
+dist/
+build/
+coverage/
+
+# فایل‌های سیستمی و ادیتور
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# لاگ‌ها
+logs/
+*.log
