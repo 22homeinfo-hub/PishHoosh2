@@ -114,8 +114,14 @@ globalThis.fetch = async (url, options = {}) => {
 
 // ── بالا آوردن سرور واقعی ────────────────────────────────
 const { createWebApp } = await import("../src/webApi.js");
+const express = (await import("express")).default;
 
-const app = createWebApp();
+// اپ اصلی دست‌نخورده می‌ماند؛ فقط در «پیش‌نمایش» یک لایهٔ نازک رویش می‌گذاریم تا
+// باز کردن ریشهٔ آدرس (مثلاً در پیش‌نمایش زنده) مستقیماً به خود مینی‌اپ برود.
+const app = express();
+app.get("/", (req, res) => res.redirect("/app"));
+app.use(createWebApp());
+
 app.listen(PORT, HOST, () => {
   console.log("────────────────────────────────────────────────────────");
   console.log("🧪 پیش‌نمایش مینی‌اپ پیش‌هوش (بدون Gemini و گوگل‌شیت واقعی)");
