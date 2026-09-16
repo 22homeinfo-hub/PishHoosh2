@@ -108,3 +108,194 @@ export function initDataRejectionMessage(reason) {
   if (reason === "no-bot-token") return "مینی‌اپ روی سرور پیکربندی نشده (TELEGRAM_BOT_TOKEN).";
   return "نشست تلگرام معتبر نیست؛ لطفاً مینی‌اپ را از داخل تلگرام باز کنید.";
 }
+
+// ────────────────────────────────────────────────────────
+// ابزار تشخیص: «چرا دکمهٔ مینی‌اپ در تلگرام نمی‌آید؟»
+//
+// این بخش فقط برای این است که بشود با باز کردن یک آدرس در مرورگر
+// (GET /api/miniapp-status) فهمید مشکل از پیکربندی سرویس است یا از سمت تلگرام،
+// بدون اینکه لازم باشد کسی لاگ‌ها را بگردد.
+// ────────────────────────────────────────────────────────
+
+// نتیجهٔ آخرین تلاش بات برای ثبت دکمهٔ منو (توسط telegram.js پر می‌شود)
+const registration = { attempted: false, ok: false, skipped: null, error: null, botUsername: null, at: null };
+
+export function setMiniAppRegistration(info) {
+  Object.assign(registration, info ?? {}, { at: new Date().toISOString() });
+}
+
+export function getMiniAppRegistration() {
+  return { ...registration };
+}
+
+// پیکربندی جاری مینی‌اپ از روی متغیرهای محیطی
+export function miniAppConfig() {
+  const url = String(process.env.MINI_APP_URL ?? "").trim();
+  return {
+    url,
+    isHttps: /^https:\/\//i.test(url),
+    title: String(process.env.MINI_APP_TITLE?.trim() || "پیش‌هوش").slice(0, 60),
+    menuButtonEnabled: String(process.env.MINI_APP_MENU_BUTTON ?? "true").toLowerCase() !== "false",
+    botTokenSet: Boolean(String(process.env.TELEGRAM_BOT_TOKEN ?? "").trim()),
+  };
+}
+
+const TELEGRAM_CACHE_MS = 30_000;
+let telegramCache = { token: null, at: 0, me: null, menuButton: null };
+
+// پرس‌وجوی زنده از خود تلگرام: معتبر بودن توکن (getMe) و وضعیت فعلی دکمهٔ منو
+export async function fetchTelegramStatus(botToken) {
+  const token = String(botToken ?? "").trim();
+  if (!token) return { error: "TELEGRAM_BOT_TOKEN تنظیم نشده است." };
+  if (telegramCache.token === token && Date.now() - telegramCache.at < TELEGRAM_CACHE_MS) {
+    return { me: telegramCache.me, menuButton: telegramCache.menuButton };
+  }
+
+  const call = async (method) => {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      return await res.json();
+    } catch (err) {
+      return { ok: false, description: err?.message ?? String(err) };
+    }
+  };
+
+  const [me, menuButton] = await Promise.all([call("getMe"), call("getChatMenuButton")]);
+  telegramCache = { token, at: Date.now(), me, menuButton };
+  return { me, menuButton };
+}
+
+/**
+ * تشخیص کامل وضعیت مینی‌اپ.
+ * @returns {Promise<{ok:boolean, verdict:string, config:object, registration:object, telegram:object, hints:string[]}>}
+ */
+export async function diagnoseMiniApp() {
+  const config = miniAppConfig();
+  const reg = getMiniAppRegistration();
+  const hints = [];
+  let telegram = { me: null, menuButton: null, error: null };
+
+  if (config.botTokenSet) telegram = await fetchTelegramStatus(process.env.TELEGRAM_BOT_TOKEN);
+
+  const menuButton = telegram?.menuButton?.ok ? telegram.menuButton.result : null;
+  const configuredUrl = menuButton?.web_app?.url ?? null;
+
+  // شکلِ گزارش در همهٔ مسیرها یکی است: menuButton همیشه «نتیجهٔ باز شده» است
+  // (نه پاکت {ok,result} تلگرام) تا لایهٔ وب مجبور نباشد دو حالت را حدس بزند.
+  const snapshot = () => ({
+    me: telegram?.me ?? null,
+    menuButton,
+    error: telegram?.error ?? null,
+  });
+
+  // ۱) اصلاً پیکربندی نشده
+  if (!config.url) {
+    return {
+      ok: false,
+      verdict: "MINI_APP_URL روی سرویس تنظیم نشده؛ بنابراین بات هیچ دکمه‌ای در تلگرام نمی‌سازد.",
+      config,
+      registration: reg,
+      telegram: snapshot(),
+      hints: [
+        "در Railway → سرویس → Variables مقدار MINI_APP_URL=https://<دامنهٔ-شما>/app را اضافه کنید و بگذارید دیپلوی شود.",
+        "تا آن موقع، آدرس /app در مرورگر کار می‌کند و دستور /app هم به بات اضافه شده است.",
+      ],
+    };
+  }
+
+  // ۲) آدرس https نیست
+  if (!config.isHttps) {
+    return {
+      ok: false,
+      verdict: `آدرس «${config.url}» با https شروع نمی‌شود و تلگرام آن را رد می‌کند.`,
+      config,
+      registration: reg,
+      telegram: snapshot(),
+      hints: ["مقدار MINI_APP_URL باید آدرس عمومی و HTTPS سرویس باشد (Public Networking در Railway روشن باشد)."],
+    };
+  }
+
+  // ۳) توکن بات مشکل دارد یا سرور به تلگرام نمی‌رسد
+  if (telegram?.error || (telegram?.me && telegram.me.ok === false)) {
+    const detail = String(telegram?.error || telegram?.me?.description || "نامشخص");
+    // «fetch failed» یعنی خودِ سرور نتوانسته به api.telegram.org وصل شود (شبکه/DNS)،
+    // که با «Unauthorized» (توکن غلط) کاملاً متفاوت است و راه‌حل دیگری دارد.
+    const networkProblem = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|timeout|socket/i.test(detail);
+    return {
+      ok: false,
+      verdict: networkProblem
+        ? `سرور به api.telegram.org نرسید (${detail})؛ پس وضعیت دکمهٔ منو قابل بررسی نیست.`
+        : `تلگرام بات را نپذیرفت: ${detail}`,
+      config,
+      registration: reg,
+      telegram: snapshot(),
+      hints: networkProblem
+        ? [
+            "دسترسی خروجی سرویس به api.telegram.org را چک کنید (فایروال/DNS).",
+            "اگر خودِ بات هم پیام‌ها را جواب نمی‌دهد، مشکل از توکن نیست بلکه از شبکهٔ سرویس است.",
+          ]
+        : [
+            "TELEGRAM_BOT_TOKEN را با مقداری که از BotFather گرفته‌اید مقایسه کنید (بدون فاصلهٔ اضافی).",
+            "اگر توکن را با /revoke باطل کرده‌اید، توکن جدید بگذارید.",
+          ],
+    };
+  }
+
+  // ۴) دکمهٔ منو درست ست شده
+  if (menuButton?.type === "web_app" && configuredUrl === config.url) {
+    return {
+      ok: true,
+      verdict: "سمت تلگرام درست است: دکمهٔ منوی بات روی مینی‌اپ تنظیم شده.",
+      config,
+      registration: reg,
+      telegram: snapshot(),
+      hints: [
+        "اگر دکمه را نمی‌بینید: تلگرام را کامل ببندید و باز کنید (کلاینت دکمهٔ منو را کش می‌کند).",
+        "دکمهٔ منو فقط در «چت خصوصی» با بات است، نه در گروه.",
+        "جایش کنار کادر نوشتن پیام است (همان آیکنی که به‌جای گیرهٔ پیوست، منوی بات را باز می‌کند).",
+        `بات: @${telegram?.me?.result?.username ?? "?"} — اگر مینی‌اپ را با بات دیگری باز کنید، امضای initData رد می‌شود.`,
+      ],
+    };
+  }
+
+  // ۵) دکمه روی آدرس دیگری ست شده (مثلاً دستی در BotFather)
+  if (menuButton?.type === "web_app" && configuredUrl !== config.url) {
+    return {
+      ok: false,
+      verdict: `دکمهٔ منو در تلگرام روی آدرس دیگری ست شده است: ${configuredUrl}`,
+      config,
+      registration: reg,
+      telegram: snapshot(),
+      hints: [
+        "اگر دستی در BotFather آدرس داده‌اید، همان را با مقدار MINI_APP_URL یکی کنید.",
+        "یا سرویس را ری‌استارت کنید تا بات دوباره دکمه را با آدرس درست ست کند.",
+      ],
+    };
+  }
+
+  // ۶) دکمه اصلاً ست نشده
+  if (!reg.attempted) {
+    hints.push(
+      "بات هنوز تلاشی برای ثبت دکمه نکرده: یا سرویس بعد از اضافه‌کردن MINI_APP_URL ری‌استارت نشده، یا کد جاری (برنچ arena/01a0ac59-pishhoosh) دیپلوی نشده است."
+    );
+    hints.push("در Railway چک کنید Branch سرویس روی برنچ درست باشد و یک Deploy جدید انجام شود.");
+  } else if (reg.skipped) {
+    hints.push(`ثبت دکمه انجام نشد چون: ${reg.skipped}`);
+  } else if (reg.error) {
+    hints.push(`تلگرام دکمه را نپذیرفت: ${reg.error}`);
+    hints.push("آدرس باید HTTPS و از اینترنت دسترس باشد؛ متن دکمه هم حداکثر ۳۲ کاراکتر است.");
+  }
+  hints.push("راه جایگزین و قطعی: در BotFather → /mybots → بات → Bot Settings → Menu Button → Configure Menu Button.");
+  hints.push("در ضمن دکمهٔ مینی‌اپ زیرِ پیام خوش‌آمدِ هر /start هم هست و دستور /app هم کار می‌کند.");
+
+  return {
+    ok: false,
+    verdict: `دکمهٔ منو در تلگرام ست نشده است (نوع فعلی: ${menuButton?.type ?? "نامشخص"}).`,
+    config,
+    registration: reg,
+    telegram: snapshot(),
+    hints,
+  };
+}

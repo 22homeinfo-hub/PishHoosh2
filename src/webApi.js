@@ -25,7 +25,7 @@ import {
   setContact,
 } from "./conversation.js";
 import { sessionStats, peekSession } from "./sessions.js";
-import { MINI_APP_SOURCE_LABEL, verifyInitData, miniAppContact, initDataRejectionMessage } from "./miniapp.js";
+import { MINI_APP_SOURCE_LABEL, verifyInitData, miniAppContact, initDataRejectionMessage, diagnoseMiniApp } from "./miniapp.js";
 import { normalizePhone } from "./text.js";
 
 const SOURCE_LABEL = "لندینگ‌پیج";
@@ -135,6 +135,32 @@ export function createWebApp() {
   });
 
   app.get("/health", (req, res) => res.json({ status: "ok", sessions: sessionStats(), uptime: Math.round(process.uptime()) }));
+
+  // ابزار تشخیص مینی‌اپ: با باز کردن این آدرس در مرورگر می‌شود فهمید چرا دکمهٔ
+  // مینی‌اپ در تلگرام نمی‌آید (پیکربندی سرویس؟ توکن بات؟ سمت تلگرام؟ کش کلاینت؟)
+  // پاسخ تلگرام ۳۰ ثانیه کش می‌شود تا کسی نتواند از آن برای حمله به api.telegram.org استفاده کند.
+  app.get("/api/miniapp-status", async (req, res) => {
+    try {
+      const report = await diagnoseMiniApp();
+      res.json({
+        ok: report.ok,
+        verdict: report.verdict,
+        hints: report.hints,
+        config: report.config,
+        registration: report.registration,
+        telegram: {
+          bot: report.telegram?.me?.ok
+            ? { username: report.telegram.me.result?.username, id: report.telegram.me.result?.id }
+            : { error: report.telegram?.error ?? report.telegram?.me?.description ?? null },
+          // نتیجهٔ باز شدهٔ getChatMenuButton (یا null اگر ست نشده/در دسترس نبود)
+          menuButton: report.telegram?.menuButton ?? null,
+        },
+      });
+    } catch (err) {
+      console.error("❌ /api/miniapp-status:", err.message);
+      res.status(500).json({ error: "بررسی وضعیت مینی‌اپ ناموفق بود." });
+    }
+  });
 
   // صفحهٔ دمو برای تست API بدون لندینگ‌پیج
   app.get("/demo", (req, res) => res.sendFile(path.join(publicDir, "demo.html")));

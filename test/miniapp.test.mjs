@@ -346,3 +346,151 @@ test("مینی‌اپ و لندینگ‌پیج دو نشست جدا دارند (
   assert.equal(web.source, "لندینگ‌پیج");
   assert.equal(web.project, null, "کاربر لندینگ‌پیج نباید نشست مینی‌اپ را ببیند");
 });
+
+// ── ۵) ابزار تشخیص «چرا دکمهٔ مینی‌اپ در تلگرام نمی‌آید؟» ──
+const { diagnoseMiniApp, setMiniAppRegistration, miniAppConfig } = await import("../src/miniapp.js");
+
+// تلگرام واقعی در تست صدا زده نمی‌شود؛ پاسخ‌ها را خودمان می‌سازیم
+function stubTelegram(responses, token) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    const payload = target.includes("getChatMenuButton") ? responses.menuButton : responses.me;
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = { token: process.env.TELEGRAM_BOT_TOKEN, url: process.env.MINI_APP_URL };
+  process.env.TELEGRAM_BOT_TOKEN = token;
+  return function restore() {
+    globalThis.fetch = original;
+    process.env.TELEGRAM_BOT_TOKEN = env.token;
+    if (env.url === undefined) delete process.env.MINI_APP_URL;
+    else process.env.MINI_APP_URL = env.url;
+  };
+}
+
+test("diagnoseMiniApp: وقتی MINI_APP_URL ست نشده، دقیقاً همان را می‌گوید", async () => {
+  delete process.env.MINI_APP_URL;
+  const report = await diagnoseMiniApp();
+  assert.equal(report.ok, false);
+  assert.match(report.verdict, /MINI_APP_URL/);
+  assert.match(report.hints[0], /Variables/);
+  assert.equal(miniAppConfig().url, "");
+});
+
+test("diagnoseMiniApp: آدرس غیر https رد می‌شود", async () => {
+  process.env.MINI_APP_URL = "http://example.com/app";
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, false);
+    assert.match(report.verdict, /https/);
+  } finally {
+    delete process.env.MINI_APP_URL;
+  }
+});
+
+test("diagnoseMiniApp: اگر تلگرام دکمه را داشته باشد، می‌گوید مشکل از کلاینت است", async () => {
+  const url = "https://diyar.up.railway.app/app";
+  process.env.MINI_APP_URL = url;
+  const restore = stubTelegram(
+    {
+      me: { ok: true, result: { id: 1, username: "diyar_bot" } },
+      menuButton: { ok: true, result: { type: "web_app", text: "پیش‌هوش", web_app: { url } } },
+    },
+    "1:DIAGNOSE-OK"
+  );
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, true);
+    assert.match(report.verdict, /سمت تلگرام درست است/);
+    assert.ok(report.hints.some((h) => /کش می‌کند/.test(h)), "باید به کش کلاینت تلگرام اشاره کند");
+    assert.ok(report.hints.some((h) => /چت خصوصی/.test(h)));
+  } finally {
+    restore();
+  }
+});
+
+test("diagnoseMiniApp: وقتی دکمه ست نشده، مسیر دیپلوی و BotFather را پیشنهاد می‌دهد", async () => {
+  process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
+  setMiniAppRegistration({ attempted: false, ok: false, skipped: null, error: null });
+  const restore = stubTelegram(
+    {
+      me: { ok: true, result: { id: 1, username: "diyar_bot" } },
+      menuButton: { ok: true, result: { type: "default" } },
+    },
+    "2:DIAGNOSE-NOT-SET"
+  );
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, false);
+    assert.match(report.verdict, /ست نشده/);
+    assert.ok(report.hints.some((h) => /ری‌استارت|دیپلوی/.test(h)));
+    assert.ok(report.hints.some((h) => /BotFather/.test(h)));
+  } finally {
+    restore();
+  }
+});
+
+test("diagnoseMiniApp: خطای تلگرام هنگام ثبت دکمه گزارش می‌شود", async () => {
+  process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
+  setMiniAppRegistration({ attempted: true, ok: false, error: "400 Bad Request: wrong url" });
+  const restore = stubTelegram(
+    {
+      me: { ok: true, result: { id: 1, username: "diyar_bot" } },
+      menuButton: { ok: true, result: { type: "commands" } },
+    },
+    "3:DIAGNOSE-ERROR"
+  );
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, false);
+    assert.ok(report.hints.some((h) => /400 Bad Request/.test(h)));
+  } finally {
+    restore();
+  }
+});
+
+test("GET /api/miniapp-status گزارش تشخیص را برمی‌گرداند", async () => {
+  process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
+  const restore = stubTelegram(
+    {
+      me: { ok: true, result: { id: 7, username: "diyar_bot" } },
+      menuButton: { ok: true, result: { type: "web_app", text: "پیش‌هوش", web_app: { url: "https://diyar.up.railway.app/app" } } },
+    },
+    "4:DIAGNOSE-ENDPOINT"
+  );
+  try {
+    const res = await fetchReal(`${base}/api/miniapp-status`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.telegram.bot.username, "diyar_bot");
+    assert.equal(data.telegram.menuButton.type, "web_app");
+    assert.equal(data.config.url, "https://diyar.up.railway.app/app");
+    // توکن بات هرگز در پاسخ لو نمی‌رود
+    assert.ok(!JSON.stringify(data).includes("DIAGNOSE-ENDPOINT"));
+  } finally {
+    restore();
+    delete process.env.MINI_APP_URL;
+  }
+});
+
+test("diagnoseMiniApp: خطای شبکه با توکنِ بد اشتباه گرفته نمی‌شود", async () => {
+  process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
+  const original = globalThis.fetch;
+  const envToken = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = "5:DIAGNOSE-NETWORK";
+  globalThis.fetch = async () => {
+    throw new Error("fetch failed");
+  };
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, false);
+    assert.match(report.verdict, /api\.telegram\.org نرسید/);
+    assert.ok(report.hints.some((h) => /دسترسی خروجی/.test(h)));
+    assert.ok(!report.hints.some((h) => /BotFather گرفته‌اید/.test(h)), "نباید کاربر را سراغ توکن بفرستد");
+  } finally {
+    globalThis.fetch = original;
+    process.env.TELEGRAM_BOT_TOKEN = envToken;
+    delete process.env.MINI_APP_URL;
+  }
+});

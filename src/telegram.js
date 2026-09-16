@@ -21,6 +21,7 @@ import { handleUserMessage, startOver, getWelcomeMessage } from "./conversation.
 import { getSession, resetSession } from "./sessions.js";
 import { setNotifier } from "./notify.js";
 import { chunkText } from "./text.js";
+import { setMiniAppRegistration } from "./miniapp.js";
 
 const TELEGRAM_MAX_LENGTH = 4096;
 const ALLOW_GROUP_CHATS = String(process.env.ALLOW_GROUP_CHATS || "false").toLowerCase() === "true";
@@ -42,6 +43,8 @@ function miniAppMarkup() {
 // تنظیم دکمهٔ منوی بات (کنار کادر نوشتن در چت خصوصی) روی مینی‌اپ.
 // نکتهٔ فنی: کتابخانهٔ node-telegram-bot-api فقط reply_markup را خودش JSON می‌کند،
 // پس آبجکت menu_button را باید دستی رشته کنیم وگرنه «[object Object]» فرستاده می‌شود.
+// نتیجهٔ هر مسیر در setMiniAppRegistration ثبت می‌شود تا GET /api/miniapp-status
+// بتواند دقیقاً بگوید چرا دکمهٔ مینی‌اپ در تلگرام دیده نمی‌شود.
 async function registerMiniAppMenuButton(bot) {
   if (!MINI_APP_URL) {
     // بی‌صدا رد نشود: صفحهٔ /app روی سرور وب فعال است ولی هیچ راه ورودی در تلگرام ساخته نمی‌شود
@@ -49,14 +52,17 @@ async function registerMiniAppMenuButton(bot) {
       "⚠️ MINI_APP_URL تنظیم نشده؛ دکمهٔ ورود به مینی‌اپ در تلگرام ساخته نمی‌شود.\n" +
         "   → آدرس عمومی سرویس را با /app بگذارید، مثلاً: MINI_APP_URL=https://your-app.up.railway.app/app"
     );
+    setMiniAppRegistration({ attempted: false, ok: false, skipped: "MINI_APP_URL تنظیم نشده است" });
     return;
   }
   if (!MINI_APP_MENU_BUTTON) {
     console.log(`   📱 مینی‌اپ: ${MINI_APP_URL} (دکمهٔ منو با MINI_APP_MENU_BUTTON=false غیرفعال است)`);
+    setMiniAppRegistration({ attempted: false, ok: false, skipped: "MINI_APP_MENU_BUTTON=false" });
     return;
   }
   if (!/^https:\/\//i.test(MINI_APP_URL)) {
     console.warn(`⚠️ MINI_APP_URL باید با https شروع شود (تلگرام آدرس «${MINI_APP_URL}» را قبول نمی‌کند).`);
+    setMiniAppRegistration({ attempted: false, ok: false, skipped: "آدرس https نیست" });
     return;
   }
   try {
@@ -64,9 +70,22 @@ async function registerMiniAppMenuButton(bot) {
       menu_button: JSON.stringify({ type: "web_app", text: MINI_APP_TITLE, web_app: { url: MINI_APP_URL } }),
     });
     console.log(`   📱 دکمهٔ منوی مینی‌اپ فعال شد: ${MINI_APP_URL}`);
+    setMiniAppRegistration({
+      attempted: true,
+      ok: true,
+      error: null,
+      skipped: null,
+      botUsername: bot.options?.username ?? null,
+    });
   } catch (err) {
     console.warn(`⚠️ تنظیم دکمهٔ منوی مینی‌اپ ناموفق بود: ${err.message}`);
     console.warn("   → آدرس باید HTTPS و از بیرون دسترس باشد؛ بات هم باید با همین توکن فعال باشد.");
+    setMiniAppRegistration({
+      attempted: true,
+      ok: false,
+      error: err.message,
+      botUsername: bot.options?.username ?? null,
+    });
   }
 }
 
@@ -295,6 +314,7 @@ export function startTelegramBot() {
       botId = me.id;
       console.log(`✅ بات تلگرام فعال شد: @${me.username}`);
       if (ADMIN_CHAT_ID) console.log(`   اطلاع‌رسانی به مدیر فعال است (chat id: ${ADMIN_CHAT_ID})`);
+      setMiniAppRegistration({ botUsername: me.username });
       await registerMiniAppMenuButton(bot);
     })
     .catch((err) => {
