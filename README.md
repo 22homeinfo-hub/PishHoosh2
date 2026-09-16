@@ -143,19 +143,27 @@ npm start
 
 مراحل:
 
-1. ریپو را در https://railway.app با **New Project → Deploy from GitHub repo** وارد کنید
-   (می‌توانید برنچ `arena/01a0a539-pishhoosh` را انتخاب کنید یا بعد از مرج به `main` دیپلوی کنید).
-2. در تب **Variables** این‌ها را وارد کنید (Railway فایل `.env` را نمی‌خواند):
+1. ریپو را در https://railway.app با **New Project → Deploy from GitHub repo** وارد کنید.
+   در **Settings → Source** برنچی را انتخاب کنید که کد نهایی آنجاست (در حال حاضر
+   `arena/01a0ac59-pishhoosh`). اگر سرویس را از قبل ساخته‌اید، فقط برنچ را عوض کنید تا
+   دیپلوی جدید انجام شود.
+2. **Public Networking** را فعال کنید تا دامنهٔ عمومی `https://<name>.up.railway.app` بگیرید؛
+   مینی‌اپ بدون HTTPS عمومی در تلگرام باز نمی‌شود.
+3. در تب **Variables** این‌ها را وارد کنید (Railway فایل `.env` را نمی‌خواند):
    `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_SHEET_ID`,
    `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`,
-   `ADMIN_CHAT_ID`, `CORS_ORIGIN`.
+   `ADMIN_CHAT_ID`, `CORS_ORIGIN` و **`MINI_APP_URL`** (مثلاً
+   `https://<name>.up.railway.app/app`).
    در کلید خصوصی حتماً `\n`ها را نگه دارید.
-3. دیپلوی کنید و در لاگ‌ها این دو خط را ببینید:
+4. دیپلوی کنید و در لاگ‌ها این خط‌ها را ببینید:
    ```
    ✅ بات تلگرام فعال شد: @your_bot
+      📱 دکمهٔ منوی مینی‌اپ فعال شد: https://<name>.up.railway.app/app
+   ✅ سرور وب روی 0.0.0.0:3000 فعال شد
    ✅ 2 پروژهٔ فعال از گوگل‌شیت خوانده شد
    ```
-4. در تلگرام `/start` بزنید.
+5. در مرورگر `https://<name>.up.railway.app/app` را باز کنید (بیرون از تلگرام هم کار می‌کند)،
+   سپس در تلگرام `/start` بزنید و مینی‌اپ را از **دکمهٔ منو** (کنار کادر نوشتن) باز کنید.
 
 **اگر قبلاً برای این بات webhook ست کرده بودید**، polling کار نمی‌کند و در لاگ خطای 409 می‌بینید.
 یک‌بار این را صدا بزنید (در مرورگر هم باز می‌شود):
