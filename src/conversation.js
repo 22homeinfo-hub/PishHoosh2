@@ -20,6 +20,7 @@
 
 import { getActiveProjects, findProject, addLead, updateLead } from "./sheets.js";
 import { startConversation, sendTurn, AiError } from "./ai.js";
+import { AmbiguousMatchError } from "./projects.js";
 import { getSession, resetSession, withSessionLock } from "./sessions.js";
 import { isRestartCommand, chunkText, formatToman } from "./text.js";
 import { notifyAdmin } from "./notify.js";
@@ -125,7 +126,19 @@ async function chooseProject(text, session) {
   const projects = await getActiveProjects();
   if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
 
-  const project = await findProject(text);
+  let project;
+  try {
+    project = await findProject(text);
+  } catch (err) {
+    if (err instanceof AmbiguousMatchError) {
+      const options = err.candidates.map((p) => p.name).join("\n");
+      return {
+        message: `منظورتون دقیقاً کدوم پروژه‌ست؟ 🙏 لطفاً اسم کامل رو بنویسید:\n\n${options}`,
+      };
+    }
+    throw err;
+  }
+
   if (!project) {
     return {
       message: `متاسفانه «${chunkText(text, 80)[0]}» رو پیدا نکردم 🙏\nلطفاً اسم دقیق پروژه رو بنویسید.`,
