@@ -1,13 +1,14 @@
 {
   "name": "diyar-amlak-bot",
-  "version": "1.1.0",
-  "description": "ربات هوشمند پیش‌هوش - دریافت اطلاعات فایل و تخمین قیمت برای دفتر املاک دیار (تلگرام + وب)",
+  "version": "1.2.0",
+  "description": "ربات هوشمند پیش‌هوش - دریافت اطلاعات فایل و تخمین قیمت برای دفتر املاک دیار (تلگرام + مینی‌اپ تلگرام + وب)",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "doctor": "node src/doctor.js",
+    "miniapp:preview": "node --import ./tools/register-preview.mjs tools/miniapp-preview.mjs",
     "test": "node --test --import ./test/register.mjs test/*.test.mjs"
   },
   "engines": {

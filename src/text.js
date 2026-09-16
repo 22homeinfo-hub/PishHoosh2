@@ -147,6 +147,28 @@ export function chunkText(text, max = 3800) {
   return chunks.filter(Boolean);
 }
 
+// یکسان‌سازی شمارهٔ تماس (برای فرم مینی‌اپ و ثبت لید)
+// «۰۹۱۲ ۱۲۳ ۴۵۶۷»، «+989121234567» و «9121234567» همه می‌شوند «09121234567».
+// شماره‌های غیرایرانی با «+» ابتدایی نگه داشته می‌شوند.
+// در صورت نامعتبر بودن، رشتهٔ خالی برمی‌گرداند (نه null و نه مقدار کثیف).
+export function normalizePhone(value) {
+  const text = collapseSpaces(toLatinDigits(value)).replace(/[^\d+]/g, "");
+  if (!text) return "";
+
+  const hasPlus = text.startsWith("+");
+  let digits = text.replace(/\D/g, "");
+  if (!digits) return "";
+
+  // ۹۸۹۱۲۱۲۳۴۵۶۷ → ۰۹۱۲۱۲۳۴۵۶۷ (موبایل ایران با کد کشور)
+  if (/^989\d{9}$/.test(digits)) digits = `0${digits.slice(2)}`;
+  // ۹۱۲۱۲۳۴۵۶۷ → ۰۹۱۲۱۲۳۴۵۶۷ (موبایل ایران بدون صفر و بدون کد کشور)
+  else if (/^9\d{9}$/.test(digits)) digits = `0${digits}`;
+
+  if (digits.length < 7 || digits.length > 15) return "";
+  if (digits.startsWith("0")) return digits;
+  return hasPlus ? `+${digits}` : digits;
+}
+
 // تشخیص عبارت‌های «شروع مجدد» با حالت‌های مختلف
 const RESTART_PATTERNS = ["شروع مجدد", "شروع دوباره", "از اول", "مکالمه جدید", "فایل جدید", "restart", "start over", "new"];
 export function isRestartCommand(text) {

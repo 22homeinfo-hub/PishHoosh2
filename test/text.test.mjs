@@ -8,6 +8,7 @@ import {
   chunkText,
   isRestartCommand,
   formatToman,
+  normalizePhone,
 } from "../src/text.js";
 
 test("parseNumber: ارقام فارسی و جداکننده هزارگان", () => {
@@ -70,4 +71,20 @@ test("isRestartCommand: حالت‌های مختلف شروع مجدد", () => {
 test("formatToman: نمایش خوانا با واحد", () => {
   assert.equal(formatToman(15960000000), "15,960,000,000 تومان");
   assert.equal(formatToman(""), "");
+});
+
+test("normalizePhone: قالب‌های مختلف شمارهٔ ایران به یک شکل تبدیل می‌شوند", () => {
+  assert.equal(normalizePhone("۰۹۱۲ ۱۲۳ ۴۵۶۷"), "09121234567");
+  assert.equal(normalizePhone("+989121234567"), "09121234567");
+  assert.equal(normalizePhone("98 912 123 4567"), "09121234567");
+  assert.equal(normalizePhone("9121234567"), "09121234567");
+  assert.equal(normalizePhone("0912-123-4567"), "09121234567");
+  // شمارهٔ غیرایرانی با «+» نگه داشته می‌شود
+  assert.equal(normalizePhone("+1 (202) 555-0123"), "+12025550123");
+});
+
+test("normalizePhone: ورودی نامعتبر → رشتهٔ خالی", () => {
+  for (const sample of ["", null, undefined, "abc", "۱۲۳", "شماره ندارم", "12345"]) {
+    assert.equal(normalizePhone(sample), "", String(sample));
+  }
 });

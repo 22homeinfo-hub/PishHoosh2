@@ -11,6 +11,9 @@
 //    می‌شود شماره‌اش را به اشتراک بگذارد. این کار خودکار و بدون تایپ انجام می‌شود.
 //    بعد از دریافت شماره، دیگر در طول مکالمه اسم/شماره پرسیده نمی‌شود مگر کاربر خودش
 //    بخواهد آن را عوض کند.
+// ۸) [جدید] اتصال مینی‌اپ تلگرام: اگر MINI_APP_URL تنظیم شده باشد، دکمهٔ منوی چت
+//    (کنار کادر نوشتن) به‌صورت خودکار روی مینی‌اپ تنظیم می‌شود و بعد از به اشتراک
+//    گذاشتن شماره، یک دکمهٔ ورود به مینی‌اپ هم برای کاربر فرستاده می‌شود.
 
 import "./env.js";
 import TelegramBot from "node-telegram-bot-api";
@@ -23,6 +26,42 @@ const TELEGRAM_MAX_LENGTH = 4096;
 const ALLOW_GROUP_CHATS = String(process.env.ALLOW_GROUP_CHATS || "false").toLowerCase() === "true";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim() || null;
 const SOURCE_LABEL = "تلگرام";
+
+// ── مینی‌اپ تلگرام ────────────────────────────────────────
+// آدرس عمومی و HTTPS مینی‌اپ، مثلاً https://your-app.up.railway.app/app
+const MINI_APP_URL = process.env.MINI_APP_URL?.trim() || "";
+const MINI_APP_TITLE = (process.env.MINI_APP_TITLE?.trim() || "پیش‌هوش").slice(0, 60);
+const MINI_APP_MENU_BUTTON = String(process.env.MINI_APP_MENU_BUTTON ?? "true").toLowerCase() !== "false";
+
+// دکمهٔ inline که مینی‌اپ را داخل خود تلگرام باز می‌کند
+function miniAppMarkup() {
+  if (!MINI_APP_URL) return undefined;
+  return { inline_keyboard: [[{ text: `📱 تخمین قیمت در مینی‌اپ`, web_app: { url: MINI_APP_URL } }]] };
+}
+
+// تنظیم دکمهٔ منوی بات (کنار کادر نوشتن در چت خصوصی) روی مینی‌اپ.
+// نکتهٔ فنی: کتابخانهٔ node-telegram-bot-api فقط reply_markup را خودش JSON می‌کند،
+// پس آبجکت menu_button را باید دستی رشته کنیم وگرنه «[object Object]» فرستاده می‌شود.
+async function registerMiniAppMenuButton(bot) {
+  if (!MINI_APP_URL) return;
+  if (!MINI_APP_MENU_BUTTON) {
+    console.log(`   📱 مینی‌اپ: ${MINI_APP_URL} (دکمهٔ منو با MINI_APP_MENU_BUTTON=false غیرفعال است)`);
+    return;
+  }
+  if (!/^https:\/\//i.test(MINI_APP_URL)) {
+    console.warn(`⚠️ MINI_APP_URL باید با https شروع شود (تلگرام آدرس «${MINI_APP_URL}» را قبول نمی‌کند).`);
+    return;
+  }
+  try {
+    await bot.setChatMenuButton({
+      menu_button: JSON.stringify({ type: "web_app", text: MINI_APP_TITLE, web_app: { url: MINI_APP_URL } }),
+    });
+    console.log(`   📱 دکمهٔ منوی مینی‌اپ فعال شد: ${MINI_APP_URL}`);
+  } catch (err) {
+    console.warn(`⚠️ تنظیم دکمهٔ منوی مینی‌اپ ناموفق بود: ${err.message}`);
+    console.warn("   → آدرس باید HTTPS و از بیرون دسترس باشد؛ بات هم باید با همین توکن فعال باشد.");
+  }
+}
 
 const CONTACT_REQUEST_TEXT =
   "سلام 🌷 من پیش‌هوش هستم، دستیار هوشمند دفتر املاک دیار.\n\nبرای شروع، لطفاً با دکمه زیر شماره تماستون رو با من به اشتراک بذارید 👇";
@@ -168,6 +207,16 @@ export function startTelegramBot() {
       await bot.sendMessage(chatId, "ممنون 🙏 شماره‌تون ثبت شد.", { reply_markup: { remove_keyboard: true } });
       const welcome = await getWelcomeMessage();
       await reply(bot, chatId, welcome);
+
+      // یک‌بار هم راه دوم را نشان می‌دهیم: مینی‌اپ با لیست پروژه‌ها و تخمین قیمت کلیکی
+      const markup = miniAppMarkup();
+      if (markup) {
+        await bot.sendMessage(
+          chatId,
+          "راستی! مینی‌اپ پیش‌هوش هم هست؛ همان‌جا لیست پروژه‌ها رو می‌بینید و با یک کلیک تخمین قیمت می‌گیرید 👇",
+          { reply_markup: markup, disable_web_page_preview: true }
+        );
+      }
     } catch (err) {
       console.error("❌ خطا بعد از دریافت مخاطب:", err.message || err);
     }
@@ -213,11 +262,12 @@ export function startTelegramBot() {
   bot.on("error", (err) => console.error("❌ خطای عمومی بات تلگرام:", err?.message || err));
 
   bot.getMe()
-    .then((me) => {
+    .then(async (me) => {
       bot.options.username = me.username;
       botId = me.id;
       console.log(`✅ بات تلگرام فعال شد: @${me.username}`);
       if (ADMIN_CHAT_ID) console.log(`   اطلاع‌رسانی به مدیر فعال است (chat id: ${ADMIN_CHAT_ID})`);
+      await registerMiniAppMenuButton(bot);
     })
     .catch((err) => {
       console.error("❌ اتصال به تلگرام ناموفق بود (توکن یا شبکه را چک کنید):", err.message);

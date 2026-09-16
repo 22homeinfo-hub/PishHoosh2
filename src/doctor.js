@@ -49,6 +49,17 @@ async function checkEnv() {
   if (!process.env.ADMIN_CHAT_ID?.trim()) warn("ADMIN_CHAT_ID تنظیم نشده", "هشدارهای خرابی ثبت لید برای مدیر ارسال نمی‌شود");
   if (!process.env.CORS_ORIGIN?.trim()) warn("CORS_ORIGIN تنظیم نشده", "API وب برای همهٔ دامنه‌ها باز است");
   ok(`مدل هوش مصنوعی: ${aiConfig.model}`, `سطح تفکر: ${aiConfig.thinkingLevel}`);
+
+  // مینی‌اپ تلگرام
+  const miniAppUrl = process.env.MINI_APP_URL?.trim();
+  if (!miniAppUrl) {
+    warn("MINI_APP_URL تنظیم نشده", "صفحهٔ مینی‌اپ روی /app در دسترس است اما دکمهٔ ورود در تلگرام ساخته نمی‌شود");
+  } else if (!/^https:\/\//i.test(miniAppUrl)) {
+    warn("MINI_APP_URL باید HTTPS باشد", `مقدار فعلی: ${miniAppUrl}`);
+    console.log("   → تلگرام فقط آدرس https را برای مینی‌اپ می‌پذیرد (مثلاً https://your-app.up.railway.app/app).");
+  } else {
+    ok("MINI_APP_URL", miniAppUrl + (/\/(app|miniapp)\/?$/.test(miniAppUrl) ? "" : " (بهتر است به /app ختم شود)"));
+  }
 }
 
 async function checkGemini() {
