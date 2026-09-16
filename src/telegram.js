@@ -43,7 +43,14 @@ function miniAppMarkup() {
 // نکتهٔ فنی: کتابخانهٔ node-telegram-bot-api فقط reply_markup را خودش JSON می‌کند،
 // پس آبجکت menu_button را باید دستی رشته کنیم وگرنه «[object Object]» فرستاده می‌شود.
 async function registerMiniAppMenuButton(bot) {
-  if (!MINI_APP_URL) return;
+  if (!MINI_APP_URL) {
+    // بی‌صدا رد نشود: صفحهٔ /app روی سرور وب فعال است ولی هیچ راه ورودی در تلگرام ساخته نمی‌شود
+    console.warn(
+      "⚠️ MINI_APP_URL تنظیم نشده؛ دکمهٔ ورود به مینی‌اپ در تلگرام ساخته نمی‌شود.\n" +
+        "   → آدرس عمومی سرویس را با /app بگذارید، مثلاً: MINI_APP_URL=https://your-app.up.railway.app/app"
+    );
+    return;
+  }
   if (!MINI_APP_MENU_BUTTON) {
     console.log(`   📱 مینی‌اپ: ${MINI_APP_URL} (دکمهٔ منو با MINI_APP_MENU_BUTTON=false غیرفعال است)`);
     return;
@@ -103,8 +110,14 @@ async function reply(bot, chatId, result) {
   }
 
   let replyMarkup;
-  if (result.removeKeyboard) replyMarkup = { remove_keyboard: true };
-  else if (result.keyboard?.length) replyMarkup = keyboardMarkup(result.keyboard);
+  if (result.keyboard?.length) replyMarkup = keyboardMarkup(result.keyboard);
+  // وقتی قرار است کیبورد حذف شود و مینی‌اپ فعال باشد، به‌جای remove_keyboard یک
+  // دکمهٔ ورود به مینی‌اپ زیر پیام می‌گذاریم. این کار امن است چون تنها کیبورد
+  // ماندگاری که بات می‌سازد «اشتراک شماره» با one_time_keyboard است و قبل از این
+  // پیام با «ممنون 🙏 شماره‌تون ثبت شد» جمع شده است.
+  // چرا؟ چون خیلی از کاربرها (از جمله خودتان) قبلاً شماره را به اشتراک گذاشته‌اند و
+  // دیگر آن پیام خوش‌آمدِ اول را نمی‌بینند؛ پس دکمهٔ مینی‌اپ باید سر راهِ هر /start باشد.
+  else if (result.removeKeyboard) replyMarkup = miniAppMarkup() ?? { remove_keyboard: true };
 
   const chunks = chunkText(text, TELEGRAM_MAX_LENGTH - 100);
   for (let i = 0; i < chunks.length; i++) {
@@ -190,6 +203,30 @@ export function startTelegramBot() {
     return runCommand(msg, null);
   });
 
+  // دستور /app: ورود مستقیم به مینی‌اپ.
+  // چرا لازم است؟ چون دکمهٔ منو گاهی در کلاینت تلگرام دیر به‌روز می‌شود یا کاربر
+  // پیدایش نمی‌کند؛ این یک راهِ قطعی و همیشه در دسترس برای باز کردن مینی‌اپ است.
+  bot.onText(/^\/app(@\w+)?$/i, async (msg) => {
+    if (!isUsableChat(msg)) return;
+    const chatId = msg.chat.id;
+    const markup = miniAppMarkup();
+    try {
+      if (!markup) {
+        await bot.sendMessage(
+          chatId,
+          "مینی‌اپ برای این بات فعال نشده است.\n(در تنظیمات سرویس، MINI_APP_URL را روی آدرس عمومی و HTTPS بگذارید.)"
+        );
+        return;
+      }
+      await bot.sendMessage(chatId, "مینی‌اپ پیش‌هوش 👇 لیست پروژه‌ها و تخمین قیمت", {
+        reply_markup: markup,
+        disable_web_page_preview: true,
+      });
+    } catch (err) {
+      console.error("❌ خطا در دستور /app:", err.message || err);
+    }
+  });
+
   // وقتی کاربر روی دکمه «اشتراک‌گذاری شماره تماس» می‌زند، تلگرام یک پیام با msg.contact می‌فرستد
   bot.on("contact", async (msg) => {
     if (!isUsableChat(msg)) return;
@@ -205,18 +242,9 @@ export function startTelegramBot() {
 
     try {
       await bot.sendMessage(chatId, "ممنون 🙏 شماره‌تون ثبت شد.", { reply_markup: { remove_keyboard: true } });
+      // خودِ پیام خوش‌آمد (از طریق reply) دکمهٔ ورود به مینی‌اپ را زیرش می‌گیرد
       const welcome = await getWelcomeMessage();
       await reply(bot, chatId, welcome);
-
-      // یک‌بار هم راه دوم را نشان می‌دهیم: مینی‌اپ با لیست پروژه‌ها و تخمین قیمت کلیکی
-      const markup = miniAppMarkup();
-      if (markup) {
-        await bot.sendMessage(
-          chatId,
-          "راستی! مینی‌اپ پیش‌هوش هم هست؛ همان‌جا لیست پروژه‌ها رو می‌بینید و با یک کلیک تخمین قیمت می‌گیرید 👇",
-          { reply_markup: markup, disable_web_page_preview: true }
-        );
-      }
     } catch (err) {
       console.error("❌ خطا بعد از دریافت مخاطب:", err.message || err);
     }
