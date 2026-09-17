@@ -147,19 +147,56 @@
         height: 16px;
       }
       .search {
-        margin: 10px 0 12px;
+        position: relative;
+        margin: 2px 0 12px;
+      }
+      .search svg {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 17px;
+        height: 17px;
+        color: var(--hint);
+        pointer-events: none;
       }
       .search input {
         width: 100%;
         border: 0;
         border-radius: 12px;
         background: var(--card);
-        padding: 10px 14px;
+        padding: 10px 38px;
         outline: none;
         color: var(--text);
+        -webkit-appearance: none;
+        appearance: none;
       }
       .search input::placeholder {
         color: var(--hint);
+      }
+      /* دکمهٔ «ضربدر» خودِ مرورگر حذف می‌شود؛ خودمان یکی می‌گذاریم که در اندروید هم باشد */
+      .search input::-webkit-search-cancel-button,
+      .search input::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .search-clear {
+        position: absolute;
+        left: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 26px;
+        height: 26px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--bg);
+        color: var(--hint);
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .status {
         text-align: center;
@@ -467,8 +504,12 @@
           <p>روی هر پروژه بزنید تا تخمین قیمتش را بگیرید</p>
         </header>
         <div class="scroll">
-          <div class="search hidden" id="search-wrap">
-            <input id="search" type="search" placeholder="جست‌وجوی پروژه…" autocomplete="off" />
+          <div class="search" id="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+            </svg>
+            <input id="search" type="search" placeholder="جست‌وجوی پروژه…" autocomplete="off" enterkeyhint="search" />
+            <button class="search-clear hidden" id="search-clear" type="button" aria-label="پاک کردن جست‌وجو">✕</button>
           </div>
           <ul class="cards" id="cards"></ul>
           <div class="status hidden" id="projects-status"></div>
@@ -553,6 +594,7 @@
         cards: document.getElementById("cards"),
         searchWrap: document.getElementById("search-wrap"),
         search: document.getElementById("search"),
+        searchClear: document.getElementById("search-clear"),
         status: document.getElementById("projects-status"),
         log: document.getElementById("log"),
         input: document.getElementById("input"),
@@ -576,6 +618,46 @@
         busy: false,
         pendingProject: null,
       };
+
+      // ── جست‌وجو ────────────────────────────────────────
+      // یکسان‌سازی متن فارسی، دقیقاً با همان قاعده‌ای که سمت سرور (src/text.js)
+      // برای تطبیق نام پروژه استفاده می‌شود. چرا؟ چون کاربر در تلگرام ممکن است
+      // «پارسـيان 1» را با «ی» عربی، «ک» عربی، نیم‌فاصله یا رقم فارسی تایپ کند و
+      // جست‌وجو نباید به این اختلاف‌ها گیر بدهد.
+      const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+      const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+
+      function normalizeFa(value) {
+        let out = String(value ?? "");
+        for (let i = 0; i < 10; i++) {
+          out = out.split(FA_DIGITS[i]).join(String(i)).split(AR_DIGITS[i]).join(String(i));
+        }
+        return (
+          out
+            // نکته: نیم‌فاصله باید «فاصله» شود، نه حذف؛ وگرنه «شهرک‌زیتون» به «شهرکزیتون»
+            // تبدیل می‌شود و با «شهرک زیتون» نمی‌خواند. به همین دلیل این دو خط
+            // عمداً جدا هستند و بازهٔ \u200B-\u200F استفاده نمی‌شود.
+            .replace(/[\u200C\u200D]/g, " ") // نیم‌فاصله و فاصلهٔ مجازی
+            .replace(/[\u200B\u200E\u200F\u2028\u2029\uFEFF]/g, "") // علامت‌های نامرئی
+            .replace(/[\u064B-\u0652\u0670\u0640]/g, "") // اعراب و «کشیده» (پارسـيان → پارسیان)
+            .replace(/[يى]/g, "ی")
+            .replace(/ك/g, "ک")
+            .replace(/[ة]/g, "ه")
+            .replace(/[أإآٱ]/g, "ا")
+            .replace(/[\u060C\u061B\u061F.,!?;:"'`~@#$%^&*_+=<>|\\/()-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase()
+        );
+      }
+
+      // جست‌وجو هم روی نام پروژه و هم روی فیلدهایش تطبیق می‌دهد، و اگر نام چند
+      // کلمه‌ای باشد هر کلمه‌اش باید پیدا شود («ساختمان نگین» با «نگین» هم می‌آید).
+      function matchesProject(project, query) {
+        if (!query) return true;
+        const haystack = normalizeFa(`${project.name} ${(project.fields || []).join(" ")}`);
+        return query.split(" ").every((word) => word && haystack.includes(word));
+      }
 
       // ── هویت ───────────────────────────────────────────
       function localSessionId() {
@@ -739,11 +821,13 @@
       }
 
       function renderProjects() {
-        const needle = els.search.value.trim().toLowerCase();
-        const items = state.projects.filter((p) => !needle || p.name.toLowerCase().includes(needle));
+        const query = normalizeFa(els.search.value);
+        const items = state.projects.filter((p) => matchesProject(p, query));
 
         els.cards.innerHTML = "";
-        els.searchWrap.classList.toggle("hidden", state.projects.length <= 6);
+        els.searchClear.classList.toggle("hidden", !els.search.value);
+        // وقتی هیچ پروژه‌ای نیست، کادر جست‌وجو فقط مزاحم است
+        els.searchWrap.classList.toggle("hidden", state.projects.length === 0);
 
         if (!state.projects.length) {
           setStatus("فعلاً پروژهٔ فعالی ثبت نشده است. لطفاً بعداً دوباره سر بزنید.");
@@ -751,7 +835,7 @@
         }
         setStatus(null);
         if (!items.length) {
-          setStatus("پروژه‌ای با این نام پیدا نشد.");
+          setStatus(`پروژه‌ای با «${els.search.value.trim()}» پیدا نشد.`);
           return;
         }
 
@@ -957,6 +1041,11 @@
         };
       });
       els.search.oninput = renderProjects;
+      els.searchClear.onclick = () => {
+        els.search.value = "";
+        renderProjects();
+        els.search.focus();
+      };
       els.composer.addEventListener("submit", (e) => {
         e.preventDefault();
         sendText(els.input.value);
