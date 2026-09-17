@@ -110,6 +110,14 @@
         gap: 12px;
         cursor: pointer;
         transition: transform 0.12s ease, opacity 0.12s ease;
+        /* ساخت‌وساز: کارت‌ها مثل طبقه‌های یک ساختمان، یکی‌یکی از پایین بالا می‌آیند.
+           نوبت هر کارت را --i می‌سازد (renderProjects). هنگام جست‌وجو --i صفر
+           می‌شود و مدت هم کوتاه‌تر تا لیست زیر تایپ کردن «کِش» نیاید. */
+        animation: rise 0.36s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+        animation-delay: calc(var(--i, 0) * 45ms);
+      }
+      .cards.is-quick .card {
+        animation-duration: 0.18s;
       }
       .card:active {
         transform: scale(0.985);
@@ -145,6 +153,11 @@
       .card-cta svg {
         width: 16px;
         height: 16px;
+        transition: transform 0.16s ease;
+      }
+      /* با فشار دادن کارت، فلشِ «تخمین قیمت» کمی جلو می‌رود */
+      .card:active .card-cta svg {
+        transform: translateX(-3px);
       }
       .search {
         position: relative;
@@ -170,6 +183,17 @@
         color: var(--text);
         -webkit-appearance: none;
         appearance: none;
+        transition: box-shadow 0.18s ease;
+      }
+      /* هنگام تایپ، کادر با رنگ خود تلگرام حلقه می‌گیرد و ذره‌بین رنگی می‌شود */
+      .search:focus-within input {
+        box-shadow: inset 0 0 0 1.5px var(--accent);
+      }
+      .search svg {
+        transition: color 0.18s ease;
+      }
+      .search:focus-within svg {
+        color: var(--accent);
       }
       .search input::placeholder {
         color: var(--hint);
@@ -260,24 +284,20 @@
         font-size: 14.5px;
         white-space: pre-wrap;
         word-break: break-word;
-        animation: pop 0.16s ease;
       }
-      @keyframes pop {
-        from {
-          opacity: 0;
-          transform: translateY(4px);
-        }
-      }
+      /* هر حباب از سمت خودش می‌آید: ربات از راست، کاربر از چپ */
       .bot {
         align-self: flex-start;
         background: var(--bubble);
         border-bottom-right-radius: 5px;
+        animation: fromRight 0.2s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
       }
       .me {
         align-self: flex-end;
         background: var(--accent);
         color: var(--accent-text);
         border-bottom-left-radius: 5px;
+        animation: fromLeft 0.2s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
       }
       .sys {
         align-self: center;
@@ -286,6 +306,7 @@
         font-size: 12.5px;
         text-align: center;
         padding: 2px 8px;
+        animation: rise 0.2s ease backwards;
       }
       .typing {
         align-self: flex-start;
@@ -352,6 +373,10 @@
         align-items: center;
         justify-content: center;
         cursor: pointer;
+        transition: transform 0.16s ease, opacity 0.16s ease;
+      }
+      .send:active:not(:disabled) {
+        transform: scale(0.88);
       }
       .send:disabled {
         opacity: 0.45;
@@ -367,9 +392,24 @@
       .tabs {
         flex: 0 0 auto;
         display: flex;
+        position: relative;
         background: var(--card);
         border-top: 1px solid var(--sep);
         padding-bottom: var(--safe-bottom);
+      }
+      /* نشانگر تب: هنگام جابه‌جایی بین بخش‌ها می‌لغزد (معاملهٔ روان!) */
+      .tabs-indicator {
+        position: absolute;
+        inset-inline-start: 0;
+        top: 0;
+        width: 50%;
+        height: 2.5px;
+        border-radius: 0 0 3px 3px;
+        background: var(--accent);
+        transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.28, 1);
+      }
+      .tabs-indicator[data-at="1"] {
+        transform: translateX(-100%);
       }
       .tab {
         flex: 1 1 0;
@@ -388,9 +428,17 @@
       .tab svg {
         width: 22px;
         height: 22px;
+        transition: transform 0.14s ease;
       }
       .tab.is-active {
         color: var(--accent);
+      }
+      /* آیکون تبِ فعال، یک پرش کوچک می‌کند */
+      .tab.is-active svg {
+        animation: tapPop 0.34s cubic-bezier(0.3, 1.4, 0.5, 1);
+      }
+      .tab:active svg {
+        transform: scale(0.88);
       }
 
       /* ── برگهٔ گرفتن شمارهٔ تماس ─────────────────────── */
@@ -418,12 +466,36 @@
       .sheet.is-open .sheet-card {
         transform: none;
       }
+      /* سربرگ برگه: قراردادِ کوچک + امضایی که همان لحظهٔ باز شدن نوشته می‌شود */
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .sheet-head > div {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .deal {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        color: var(--accent);
+      }
+      .deal-sign {
+        stroke-dasharray: 16;
+        stroke-dashoffset: 16;
+      }
+      .sheet.is-open .deal-sign {
+        animation: sign 0.9s 0.25s cubic-bezier(0.4, 0.1, 0.2, 1) forwards;
+      }
       .sheet-card h2 {
         margin: 0;
         font-size: 17px;
       }
-      .sheet-card > p {
-        margin: 4px 0 14px;
+      .sheet-card p {
+        margin: 4px 0 0;
         color: var(--hint);
         font-size: 13px;
       }
@@ -448,6 +520,7 @@
         border-color: var(--accent);
       }
       .primary {
+        position: relative;
         width: 100%;
         border: 0;
         border-radius: 13px;
@@ -457,9 +530,42 @@
         font-weight: 600;
         cursor: pointer;
         margin-top: 4px;
+        transition: transform 0.14s ease;
+      }
+      .primary:active:not(:disabled) {
+        transform: scale(0.985);
       }
       .primary:disabled {
         opacity: 0.5;
+      }
+      /* لحظهٔ «معامله ثبت شد»: متن کنار می‌رود و تیک کشیده می‌شود */
+      .primary-label {
+        transition: opacity 0.14s ease;
+      }
+      .primary.is-done {
+        opacity: 1;
+      }
+      .primary.is-done .primary-label {
+        opacity: 0;
+      }
+      .tick {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 26px;
+        height: 26px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .tick path {
+        stroke-dasharray: 26;
+        stroke-dashoffset: 26;
+      }
+      .primary.is-done .tick {
+        opacity: 1;
+      }
+      .primary.is-done .tick path {
+        animation: sign 0.34s 0.06s ease forwards;
       }
       .link {
         width: 100%;
@@ -492,6 +598,162 @@
       #toast.is-on {
         opacity: 1;
         transform: none;
+      }
+      #toast.is-pop {
+        animation: toastPop 0.3s cubic-bezier(0.22, 1.4, 0.4, 1);
+      }
+      @keyframes toastPop {
+        from {
+          opacity: 0;
+          transform: translateY(14px) scale(0.96);
+        }
+      }
+
+      /* ── انیمیشن‌ها ───────────────────────────────────────
+         سه موتیف کوچک و هم‌قدوقوارهٔ کارِ دفتر املاک:
+           ساخت‌وساز → کارت‌ها مثل طبقه‌ها بالا می‌آیند و در «در حال دریافت»،
+                       جرثقیل تاب می‌خورد و طبقه‌ها یکی‌یکی ساخته می‌شوند.
+           معامله    → نشانگر تب می‌لغزد، امضا پای قرارداد نوشته می‌شود و بعد
+                       از ثبت شماره، تیکِ «ثبت شد» کشیده می‌شود.
+           پول       → قیمت تخمینی در یک برچسب با سکهٔ چرخان، شمارش رقم‌ها و
+                       یک برقِ کوتاه ظاهر می‌شود.
+         همه کوتاه (زیر یک ثانیه) و بی‌صدا هستند و اگر کاربر «کاهش حرکت» را در
+         سیستم‌عاملش روشن کرده باشد، کاملاً خاموش می‌شوند. */
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+      }
+      @keyframes fromRight {
+        from {
+          opacity: 0;
+          transform: translateX(10px);
+        }
+      }
+      @keyframes fromLeft {
+        from {
+          opacity: 0;
+          transform: translateX(-10px);
+        }
+      }
+      @keyframes tapPop {
+        45% {
+          transform: translateY(-3px) scale(1.14);
+        }
+      }
+      @keyframes sign {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      /* جابه‌جایی بین دو بخش، هم‌جهت با نوار تب */
+      .screen.slide-left {
+        animation: fromLeft 0.26s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+      .screen.slide-right {
+        animation: fromRight 0.26s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+
+      /* جرثقیلِ وضعیت «در حال دریافت پروژه‌ها…» */
+      .crane {
+        display: block;
+        width: 62px;
+        height: 62px;
+        margin: 0 auto 8px;
+        color: var(--hint);
+      }
+      .crane-hook {
+        transform-box: view-box;
+        transform-origin: 40px 14px;
+        animation: sway 2.4s ease-in-out infinite;
+      }
+      @keyframes sway {
+        0%,
+        100% {
+          transform: rotate(-6deg);
+        }
+        50% {
+          transform: rotate(6deg);
+        }
+      }
+      .crane-stack rect {
+        animation: stack 1.9s ease-in-out infinite;
+      }
+      .crane-stack rect:nth-of-type(2) {
+        animation-delay: 0.2s;
+      }
+      .crane-stack rect:nth-of-type(3) {
+        animation-delay: 0.4s;
+      }
+      @keyframes stack {
+        0%,
+        100% {
+          opacity: 0.18;
+        }
+        30%,
+        78% {
+          opacity: 1;
+        }
+      }
+
+      /* برچسب قیمت */
+      .price {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin: 0 1px;
+        padding: 1px 8px 1px 6px;
+        border-radius: 999px;
+        background: rgba(127, 127, 127, 0.13);
+        color: var(--accent);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        overflow: hidden;
+        vertical-align: baseline;
+        perspective: 80px; /* برای چرخش سکه */
+      }
+      .price-coin {
+        flex: 0 0 auto;
+        width: 15px;
+        height: 15px;
+        animation: coin 0.75s cubic-bezier(0.3, 0.8, 0.3, 1) backwards;
+      }
+      @keyframes coin {
+        from {
+          opacity: 0;
+          transform: rotateY(-180deg) scale(0.5);
+        }
+      }
+      /* یک برقِ کوتاه روی برچسب، مثل برقِ اسکناس نو */
+      .price::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.32) 50%, transparent 70%);
+        transform: translateX(-130%);
+        animation: shine 0.9s 0.35s ease-out;
+        pointer-events: none;
+      }
+      @keyframes shine {
+        to {
+          transform: translateX(130%);
+        }
+      }
+
+      /* اگر کاربر «کاهش حرکت» خواسته باشد، هیچ‌چیز تکان نمی‌خورد */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-delay: 0ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
       }
     </style>
   </head>
@@ -539,6 +801,7 @@
 
     <!-- ══ نوار تب ══════════════════════════════════════ -->
     <nav class="tabs">
+      <span class="tabs-indicator" id="tabs-indicator" data-at="0" aria-hidden="true"></span>
       <button class="tab is-active" data-view="projects" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /><path d="M9 10h.01M15 10h.01" />
@@ -556,8 +819,19 @@
     <!-- ══ برگهٔ شمارهٔ تماس ═══════════════════════════ -->
     <div class="sheet hidden" id="sheet">
       <div class="sheet-card">
-        <h2>شمارهٔ تماس</h2>
-        <p>تا کارشناس دفتر دیار بتواند تخمین نهایی را با شما در میان بگذارد.</p>
+        <div class="sheet-head">
+          <!-- قراردادِ کوچک: بدنه ثابت است و امضا همان لحظهٔ باز شدن برگه نوشته می‌شود -->
+          <svg class="deal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+            <path d="M14 3v5h5" />
+            <path d="M8.5 12h4" />
+            <path class="deal-sign" d="M8.6 17.4c1.3-2.7 2-2.7 2.4-1 .3 1.3 1 1.5 1.6.2.5-1.1 1.1-1.3 1.7-.3" />
+          </svg>
+          <div>
+            <h2>شمارهٔ تماس</h2>
+            <p>تا کارشناس دفتر دیار بتواند تخمین نهایی را با شما در میان بگذارد.</p>
+          </div>
+        </div>
         <div class="field">
           <label for="sheet-name">نام و نام خانوادگی</label>
           <input id="sheet-name" type="text" placeholder="مثلاً علی رضایی" autocomplete="name" />
@@ -566,7 +840,12 @@
           <label for="sheet-phone">شمارهٔ موبایل</label>
           <input id="sheet-phone" type="tel" inputmode="tel" placeholder="۰۹۱۲۱۲۳۴۵۶۷" autocomplete="tel" />
         </div>
-        <button class="primary" id="sheet-save" type="button">ثبت و دریافت تخمین</button>
+        <button class="primary" id="sheet-save" type="button">
+          <span class="primary-label">ثبت و دریافت تخمین</span>
+          <svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m4.5 12.5 5 5 10-11" />
+          </svg>
+        </button>
         <button class="link" id="sheet-skip" type="button">فعلاً بدون شماره ادامه می‌دهم</button>
       </div>
     </div>
@@ -591,6 +870,7 @@
       const els = {
         screens: { projects: document.getElementById("screen-projects"), chat: document.getElementById("screen-chat") },
         tabs: [...document.querySelectorAll(".tab")],
+        tabsIndicator: document.getElementById("tabs-indicator"),
         cards: document.getElementById("cards"),
         searchWrap: document.getElementById("search-wrap"),
         search: document.getElementById("search"),
@@ -627,13 +907,21 @@
       const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
       const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
 
-      function normalizeFa(value) {
-        let out = String(value ?? "");
+      function toLatinDigits(text) {
+        let out = String(text ?? "");
         for (let i = 0; i < 10; i++) {
           out = out.split(FA_DIGITS[i]).join(String(i)).split(AR_DIGITS[i]).join(String(i));
         }
+        return out;
+      }
+
+      function toFaDigits(text) {
+        return String(text ?? "").replace(/[0-9]/g, (d) => FA_DIGITS[Number(d)]);
+      }
+
+      function normalizeFa(value) {
         return (
-          out
+          toLatinDigits(value)
             // نکته: نیم‌فاصله باید «فاصله» شود، نه حذف؛ وگرنه «شهرک‌زیتون» به «شهرکزیتون»
             // تبدیل می‌شود و با «شهرک زیتون» نمی‌خواند. به همین دلیل این دو خط
             // عمداً جدا هستند و بازهٔ \u200B-\u200F استفاده نمی‌شود.
@@ -657,6 +945,86 @@
         if (!query) return true;
         const haystack = normalizeFa(`${project.name} ${(project.fields || []).join(" ")}`);
         return query.split(" ").every((word) => word && haystack.includes(word));
+      }
+
+      // ── پول: برچسب قیمت ─────────────────────────────────
+      // هر جا ربات «عدد + تومان/ریال» نوشت، همان تکه به شکل برچسب قیمت با سکهٔ
+      // چرخان و شمارش رقم‌ها نمایش داده می‌شود؛ بقیهٔ متن دست‌نخورده می‌ماند.
+      // چرا سمت کاربر؟ چون جملهٔ اعلام قیمت را هوش مصنوعی می‌نویسد و قالب ثابتی
+      // ندارد؛ این الگو فقط عددِ چسبیده به واحد پول را می‌گیرد، پس «۱۲۰ متر»
+      // اشتباهاً برچسب نمی‌خورد.
+      const PRICE_SOURCE = "([0-9۰-۹][0-9۰-۹٬،, ]*[0-9۰-۹])\\s*(تومان|ریال|﷼)";
+
+      function reduceMotion() {
+        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      }
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // چند مکث کوتاه برای دیده‌شدن انیمیشن‌ها؛ با «کاهش حرکت» صفر می‌شوند
+      function beat(ms) {
+        return wait(reduceMotion() ? 0 : ms);
+      }
+
+      function parseAmount(raw) {
+        const num = Number(toLatinDigits(raw).replace(/[٬،,\s]/g, ""));
+        return Number.isFinite(num) ? num : null;
+      }
+
+      // عدد را با همان جداکنندهٔ هزارگان و همان رقم‌های متنِ ربات می‌نویسد تا
+      // شمارش، ظاهر عدد نهایی را عوض نکند.
+      function formatLike(value, sample) {
+        const sep = /[٬،]/.test(sample) ? "٬" : ",";
+        const out = Math.round(value).toLocaleString("en-US").replace(/,/g, sep);
+        return /[۰-۹]/.test(sample) ? toFaDigits(out) : out;
+      }
+
+      function countUp(node, target, sample) {
+        // اول عددِ درست را می‌گذاریم؛ شمارش فقط آب‌رویی است و اگر نشد (کاهش
+        // حرکت، یا نبود requestAnimationFrame) همان عدد نهایی دیده می‌شود.
+        node.textContent = sample;
+        if (target === null || reduceMotion() || typeof requestAnimationFrame !== "function") return;
+        const duration = 620;
+        const start = Date.now();
+        const from = target * 0.4;
+        const step = () => {
+          const t = Math.min(1, (Date.now() - start) / duration);
+          const eased = 1 - Math.pow(1 - t, 3);
+          node.textContent = formatLike(from + (target - from) * eased, sample);
+          if (t < 1) requestAnimationFrame(step);
+          else node.textContent = sample;
+        };
+        requestAnimationFrame(step);
+      }
+
+      function priceChip(digits, unit) {
+        const chip = document.createElement("span");
+        chip.className = "price";
+        chip.innerHTML =
+          '<svg class="price-coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v8.4"/><path d="M14.6 10c0-1.1-1.2-1.9-2.6-1.9S9.4 8.9 9.4 10s1.1 1.6 2.6 2 2.6 1 2.6 2.1-1.2 1.9-2.6 1.9-2.6-.8-2.6-1.9"/></svg>';
+        const num = document.createElement("span");
+        chip.appendChild(num);
+        chip.appendChild(document.createTextNode(` ${unit}`));
+        countUp(num, parseAmount(digits), digits);
+        return chip;
+      }
+
+      // متن پیام را تکه می‌کند: تکه‌های قیمت به شکل برچسب، بقیه متن ساده.
+      function fillWithPrices(node, text) {
+        const re = new RegExp(PRICE_SOURCE, "g");
+        let last = 0;
+        let found = false;
+        let m;
+        while ((m = re.exec(text))) {
+          if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
+          node.appendChild(priceChip(m[1], m[2]));
+          last = m.index + m[0].length;
+          found = true;
+        }
+        if (last < text.length) node.appendChild(document.createTextNode(text.slice(last)));
+        // لحظهٔ اعلام قیمت، یک لرزش ملایم هم دارد
+        if (found) haptic("success");
+        return found;
       }
 
       // ── هویت ───────────────────────────────────────────
@@ -742,9 +1110,19 @@
 
       // ── نمایش بخش‌ها ───────────────────────────────────
       function showView(name) {
+        const previous = state.view;
         state.view = name;
         for (const [key, screen] of Object.entries(els.screens)) screen.classList.toggle("hidden", key !== name);
         els.tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.view === name));
+        els.tabsIndicator.dataset.at = name === "chat" ? "1" : "0";
+
+        // صفحه هم‌جهت با نوار تب می‌لغزد: «چت» از چپ می‌آید، «پروژه‌ها» از راست
+        if (previous !== name) {
+          const screen = els.screens[name];
+          screen.classList.remove("slide-left", "slide-right");
+          void screen.offsetWidth; // تا انیمیشن از نو اجرا شود
+          screen.classList.add(name === "chat" ? "slide-left" : "slide-right");
+        }
         if (name === "chat") {
           scrollLog();
           // کمی صبر می‌کنیم تا اگر برگهٔ شمارهٔ تماس در حال بسته‌شدن است، انیمیشنش تمام شود
@@ -762,6 +1140,10 @@
       function toast(message) {
         els.toast.textContent = message;
         els.toast.classList.add("is-on");
+        // اگر اعلان قبلی هنوز روی صفحه بود، انیمیشن ورود از نو اجرا شود
+        els.toast.classList.remove("is-pop");
+        void els.toast.offsetWidth;
+        els.toast.classList.add("is-pop");
         clearTimeout(toast._t);
         toast._t = setTimeout(() => els.toast.classList.remove("is-on"), 3200);
       }
@@ -770,7 +1152,9 @@
       function bubble(text, who) {
         const div = document.createElement("div");
         div.className = `msg ${who}`;
-        div.textContent = text;
+        // در پیام‌های ربات، قیمت به شکل برچسبِ متحرک درمی‌آید
+        if (who === "bot") fillWithPrices(div, String(text ?? ""));
+        else div.textContent = text;
         els.log.appendChild(div);
         scrollLog();
         return div;
@@ -803,13 +1187,23 @@
       }
 
       // ── لیست پروژه‌ها ──────────────────────────────────
-      function setStatus(text, withRetry) {
+      // جرثقیلِ «در حال دریافت»: دکل و بازو ثابت‌اند، قلاب آرام تاب می‌خورد و
+      // طبقه‌های سمت راست یکی‌یکی روشن می‌شوند (انگار ساختمان ساخته می‌شود).
+      const CRANE_SVG = `<svg class="crane" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 58h56" /><path d="M16 58V14" /><path d="M9 14h39" /><path d="M16 22 9 14M16 22l7-8" />
+        <g class="crane-hook"><path d="M40 14v13" /><rect x="34.5" y="27" width="11" height="7" rx="1.5" /></g>
+        <g class="crane-stack"><rect x="47" y="50" width="11" height="8" rx="1.5" /><rect x="47" y="41.5" width="11" height="8" rx="1.5" /><rect x="47" y="33" width="11" height="8" rx="1.5" /></g>
+      </svg>`;
+
+      function setStatus(text, withRetry, loading) {
+        els.status.textContent = "";
         if (!text) {
           els.status.classList.add("hidden");
           return;
         }
         els.status.classList.remove("hidden");
-        els.status.textContent = text;
+        if (loading) els.status.innerHTML = CRANE_SVG;
+        els.status.appendChild(document.createTextNode(text));
         if (withRetry) {
           const btn = document.createElement("button");
           btn.type = "button";
@@ -828,6 +1222,8 @@
         els.searchClear.classList.toggle("hidden", !els.search.value);
         // وقتی هیچ پروژه‌ای نیست، کادر جست‌وجو فقط مزاحم است
         els.searchWrap.classList.toggle("hidden", state.projects.length === 0);
+        // هنگام تایپ، کارت‌ها بی‌درنگ و بدون نوبت جابه‌جا می‌شوند
+        els.cards.classList.toggle("is-quick", !!query);
 
         if (!state.projects.length) {
           setStatus("فعلاً پروژهٔ فعالی ثبت نشده است. لطفاً بعداً دوباره سر بزنید.");
@@ -839,9 +1235,12 @@
           return;
         }
 
-        for (const project of items) {
+        items.forEach((project, index) => {
           const li = document.createElement("li");
           li.className = "card";
+          // نوبتِ بالا آمدن کارت؛ از ۹ به بعد همه با هم می‌آیند تا لیست طولانی
+          // معطل نماند (مقدار متغیر CSS باید رشته باشد)
+          li.style.setProperty("--i", String(query ? 0 : Math.min(index, 9)));
 
           const main = document.createElement("div");
           main.className = "card-main";
@@ -864,7 +1263,7 @@
           li.append(main, cta);
           li.onclick = () => openProject(project);
           els.cards.appendChild(li);
-        }
+        });
       }
 
       // کلیک روی کارت پروژه: اگر شماره نداشته باشیم اول یک فرم کوچک نشان می‌دهیم،
@@ -935,6 +1334,10 @@
           const data = await api("api/contact", { customerName: name, phone });
           state.contact = data.contact || { customerName: name, hasPhone: true };
           haptic("success");
+          // پیش از بسته‌شدن برگه، تیکِ «معامله ثبت شد» کشیده می‌شود
+          els.sheetSave.classList.add("is-done");
+          await beat(430);
+          els.sheetSave.classList.remove("is-done");
           const project = state.pendingProject;
           els.sheet.classList.remove("is-open");
           setTimeout(() => els.sheet.classList.add("hidden"), 180);
@@ -946,6 +1349,7 @@
           toast(err.message);
         } finally {
           els.sheetSave.disabled = false;
+          els.sheetSave.classList.remove("is-done");
         }
       }
 
@@ -1008,7 +1412,7 @@
 
       // ── راه‌اندازی ─────────────────────────────────────
       async function boot() {
-        setStatus("در حال دریافت پروژه‌ها…");
+        setStatus("در حال دریافت پروژه‌ها…", false, true);
         try {
           const data = await api("api/state");
           state.projects = data.projects || [];
