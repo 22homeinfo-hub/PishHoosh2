@@ -9,12 +9,15 @@ const { installGeminiStub } = await import("./gemini-stub.mjs");
 const gemini = installGeminiStub();
 const sheets = await import("./mock-sheets.mjs");
 const { createWebApp } = await import("../src/webApi.js");
+const { silenceAppLogs } = await import("./quiet.mjs");
 
 const fetchReal = gemini.realFetch.bind(globalThis);
 let server;
 let base;
+let restoreLogs = () => {};
 
 test.before(async () => {
+  restoreLogs = silenceAppLogs();
   const app = createWebApp();
   server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -23,6 +26,7 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  restoreLogs();
 });
 
 test.beforeEach(() => {
@@ -41,9 +45,12 @@ test("GET /api/welcome لیست پروژه‌ها را برای ویجت برم�
   const res = await fetchReal(`${base}/api/welcome`);
   assert.equal(res.status, 200);
   const data = await res.json();
-  assert.match(data.message, /پارسیان ۱/);
+  assert.match(data.message, /اسم پروژه/);
   assert.equal(data.projects.length, 3);
   assert.deepEqual(Object.keys(data.projects[0]).sort(), ["fields", "name"]);
+  // قیمت پایه و فرمول قیمت‌گذاری اطلاعات داخلی دفتر است و نباید به کلاینت برود
+  assert.equal(data.projects[0].pricePerMeter, undefined);
+  assert.equal(data.projects[0].notes, undefined);
 });
 
 test("POST /api/message بدون فیلد اجباری → 400", async () => {

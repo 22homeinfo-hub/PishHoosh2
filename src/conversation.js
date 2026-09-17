@@ -1,21 +1,33 @@
-// منطق مشترک مکالمه - هم برای تلگرام و هم برای لندینگ‌پیج
-// این‌طور منطق یک بار نوشته می‌شود و هر تغییر هر دو کانال را پوشش می‌دهد.
+// منطق مشترک مکالمه - هم برای تلگرام، هم لندینگ‌پیج و هم مینی‌اپ تلگرام
+// این‌طور منطق یک بار نوشته می‌شود و هر تغییر همهٔ کانال‌ها را پوشش می‌دهد.
 //
 // خروجی همه توابع یک آبجکت است:
-//   { message, projects?, keyboard?, removeKeyboard? }
+//   { message, projects?, project?, keyboard?, removeKeyboard? }
 // - message: متنی که به کاربر نشان داده می‌شود
-// - projects: لیست پروژه‌ها (برای ویجت وب و دکمه‌های تلگرام)
+// - projects: لیست پروژه‌ها (برای ویجت وب و تب «پروژه‌ها» در مینی‌اپ)
+// - project: پروژهٔ انتخاب‌شدهٔ جاری (برای نمایش در سربرگ چت مینی‌اپ)
 // - keyboard / removeKeyboard: راهنمای لایه تلگرام برای ساخت کیبورد
 //
 // وضعیت‌های نشست:
-//   choosing_project → کاربر هنوز پروژه را انتخاب نکرده
-//   chatting         → در حال جمع‌آوری اطلاعات
+//   awaiting_contact → (فقط تلگرام) هنوز شماره از طریق دکمه اشتراک مخاطب گرفته نشده
+//   choosing_project → کاربر هنوز اسم پروژه را نگفته
+//   chatting         → در حال جمع‌آوری اطلاعات فایل
 //   followup         → قیمت اعلام و لید ثبت شده، اما کاربر می‌تواند اصلاحیه بدهد
+//
+// تغییرات کلیدی نسبت به نسخه قبل:
+// ۱) دیگر لیست پروژه‌ها به کاربر نشان داده نمی‌شود؛ مستقیم از او خواسته می‌شود اسم پروژه را بنویسد.
+// ۲) نام و شماره تماس دیگر توسط AI پرسیده نمی‌شود؛ این دو یا از قبل (مثلاً دکمه اشتراک مخاطب
+//    تلگرام) روی session.contact ست شده‌اند، یا (در وب) از فرم لندینگ‌پیج می‌آیند.
+// ۳) [جدید] selectProject: انتخاب «قطعی» پروژه برای مینی‌اپ. وقتی کاربر روی کارت یک
+//    پروژه می‌زند، دیگر نیازی به تطبیق متن و حدس‌زدن نیست؛ نام مستقیماً از لیست شیت
+//    آمده، پس بدون مصرف سهمیهٔ AI مکالمهٔ همان پروژه شروع می‌شود.
+// ۴) [جدید] setContact: ذخیرهٔ نام/شمارهٔ گرفته‌شده از فرم مینی‌اپ یا پروفایل تلگرام.
 
 import { getActiveProjects, findProject, addLead, updateLead } from "./sheets.js";
 import { startConversation, sendTurn, AiError } from "./ai.js";
+import { AmbiguousMatchError, matchProject } from "./projects.js";
 import { getSession, resetSession, withSessionLock } from "./sessions.js";
-import { isRestartCommand, chunkText, formatToman } from "./text.js";
+import { isRestartCommand, chunkText, formatToman, normalizeForMatch, parseChoice, normalizePhone } from "./text.js";
 import { notifyAdmin } from "./notify.js";
 
 const NO_PROJECT_MESSAGE =
@@ -29,20 +41,32 @@ const RETRY_SAVED_MESSAGE = "✅ اطلاعاتتون با موفقیت ثبت �
 const FOLLOWUP_HINT =
   "\n\nاگه می‌خواید اطلاعات رو اصلاح کنید همین‌جا بنویسید، و برای ثبت فایل جدید «شروع مجدد» را بفرستید.";
 
-function projectListText(projects) {
-  return projects.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
-}
+const ASK_PROJECT_NAME_MESSAGE =
+  "سلام 🌷 به پیش‌هوش، دستیار هوشمند دفتر املاک دیار خوش اومدید!\n\nلطفاً اسم پروژه‌ای که می‌خواید براش استعلام قیمت بگیرید رو بنویسید:";
 
-function welcomeText(projects) {
-  return `سلام و وقت بخیر 🌷 به ربات دفتر املاک دیار خوش اومدید!\n\nبرای ثبت اطلاعات فایلتون، شماره یا اسم پروژه رو بفرستید:\n\n${projectListText(
-    projects
-  )}`;
+function welcomeText() {
+  return ASK_PROJECT_NAME_MESSAGE;
 }
 
 export async function getWelcomeMessage() {
   const projects = await getActiveProjects();
   if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
-  return { message: welcomeText(projects), projects };
+  // فقط خلاصهٔ پروژه‌ها به کلاینت می‌رود؛ قیمت پایه و قواعد قیمت‌گذاری داخلی دفتر است.
+  return { message: welcomeText(), projects: projects.map(projectSummary) };
+}
+
+// خلاصهٔ امن یک پروژه برای فرستادن به کلاینت (مینی‌اپ و ویجت وب).
+// عمداً pricePerMeter و notes فرستاده نمی‌شود: فرمول و قیمت پایه، اطلاعات داخلی دفتر است
+// و عدد نهایی را خود هوش مصنوعی اعلام می‌کند.
+function projectSummary(project) {
+  return { name: project.name, fields: Array.isArray(project.fields) ? project.fields : [] };
+}
+
+// لیست پروژه‌های فعال برای نمایش در تب «پروژه‌ها»ی مینی‌اپ.
+// بدون شروع مکالمه و بدون مصرف سهمیهٔ Gemini.
+export async function listProjects() {
+  const projects = await getActiveProjects();
+  return projects.map(projectSummary);
 }
 
 // صورت‌جلسهٔ مکالمه برای ارسال به مدیر وقتی ثبت لید شکست می‌خورد
@@ -54,7 +78,6 @@ function transcriptFromSession(session) {
         const text = (item.parts ?? []).map((p) => p?.text ?? "").join(" ");
         const clean = text.replace(/\s+/g, " ").trim();
         if (!clean) return "";
-        // اگر خروجی ساخت‌یافته بود، فقط بخش reply را نگه دار
         try {
           const parsed = JSON.parse(clean);
           if (parsed?.reply) return `${item.role === "user" ? "کاربر" : "ربات"}: ${parsed.reply}`;
@@ -71,9 +94,10 @@ function transcriptFromSession(session) {
 }
 
 async function saveLead(session, lead, source) {
+  const contact = session.contact || {};
   const data = {
-    customerName: lead?.customerName || "",
-    phone: lead?.phone || "",
+    customerName: contact.customerName || "",
+    phone: contact.phone || "",
     projectName: session.project?.name || "",
     fileInfo: lead?.fileInfo || "",
     estimatedPrice: lead?.estimatedPrice ?? "",
@@ -118,21 +142,10 @@ async function saveLead(session, lead, source) {
   }
 }
 
-async function chooseProject(text, session) {
-  const projects = await getActiveProjects();
-  if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
-
-  const project = await findProject(text);
-  if (!project) {
-    return {
-      message: `متاسفانه «${chunkText(text, 80)[0]}» رو بین پروژه‌ها پیدا نکردم 🙏\n\nمی‌تونید شمارهٔ پروژه یا اسم کاملش رو بفرستید:\n\n${projectListText(
-        projects
-      )}`,
-      projects,
-      keyboard: projects.map((p) => p.name),
-    };
-  }
-
+// شروع مکالمهٔ یک پروژه روی نشست کاربر.
+// نکتهٔ مهم: سلام اولیه در تاریخچهٔ چت «کاشته» می‌شود، پس این تابع هیچ درخواستی
+// به Gemini نمی‌زند و سهمیه‌ای مصرف نمی‌کند.
+function startProjectChat(project, session, retryHint) {
   try {
     const { chat, greeting } = startConversation(project);
     session.project = project;
@@ -140,26 +153,160 @@ async function chooseProject(text, session) {
     session.state = "chatting";
     session.leadRowNumber = null;
     session.savedLead = null;
+    session.pendingLead = null;
     if (project.warnings?.length) console.warn(`⚠️ پروژه «${project.name}» با هشدار بارگذاری شد: ${project.warnings.join("؛ ")}`);
-    return { message: greeting, removeKeyboard: true };
+    return { message: greeting, removeKeyboard: true, project: projectSummary(project) };
   } catch (err) {
-    // معمولاً یعنی ستون «فیلدهای موردنیاز» برای این پروژه خالی است
     const userMessage = err instanceof AiError ? err.userMessage : "برای این پروژه خطایی پیش اومد. لطفاً پروژهٔ دیگری را انتخاب کنید.";
     console.error(`❌ شروع مکالمه برای پروژه «${project.name}» ناموفق بود:`, err.message);
     notifyAdmin(`🚨 پروژه «${project.name}» قابل شروع نیست: ${err.message}`);
-    const others = projects.filter((p) => p.name !== project.name);
+    return { message: `${userMessage}\n\n${retryHint}` };
+  }
+}
+
+// پیدا کردن پروژه از روی «ارجاع» کلاینت: یا شمارهٔ ردیف در لیست، یا نام پروژه.
+// برخلاف مسیر متنی (که کاربر آزادانه تایپ می‌کند)، اینجا نام از لیست خودِ شیت آمده؛
+// پس اول تطبیق دقیق انجام می‌شود و فقط در نهایت به تطبیق تقریبی می‌رسیم.
+function pickProject(projects, ref) {
+  const text = String(ref ?? "").trim();
+  if (!text) return null;
+
+  const index = parseChoice(text, projects.length);
+  if (index !== null) return projects[index] ?? null;
+
+  const needle = normalizeForMatch(text);
+  const exact = projects.find((p) => normalizeForMatch(p.name) === needle);
+  if (exact) return exact;
+
+  try {
+    return matchProject(projects, text);
+  } catch (err) {
+    // AmbiguousMatchError: در مینی‌اپ کاربر از لیست انتخاب می‌کند، پس ابهام یعنی
+    // نام فرستاده‌شده با فهرست جاری هم‌خوانی ندارد؛ null برمی‌گردانیم تا لیست تازه نشان داده شود.
+    if (err instanceof AmbiguousMatchError) return null;
+    throw err;
+  }
+}
+
+/**
+ * انتخاب قطعی یک پروژه و شروع مکالمهٔ تخمین قیمت.
+ * مسیر مینی‌اپ: کاربر روی کارت پروژه می‌زند → بدون تایپ و بدون ابهام، مکالمه شروع می‌شود.
+ * @param {string} key شناسهٔ نشست (مثل "miniapp:123")
+ * @param {string|number} projectRef نام پروژه یا شمارهٔ آن در لیست
+ * @param {string} source برچسب منبع برای ثبت لید
+ * @param {{customerName?:string, phone?:string}} [contact] اطلاعات تماس از قبل دانسته
+ */
+export function selectProject(key, projectRef, source, contact) {
+  return withSessionLock(key, async () => {
+    const session = getSession(key);
+    if (contact && (contact.customerName || contact.phone)) {
+      session.contact = { ...session.contact, ...contact };
+    }
+
+    const projects = await getActiveProjects();
+    if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
+
+    const project = pickProject(projects, projectRef);
+    if (!project) {
+      console.warn(`⚠️ [${key}] پروژهٔ درخواستی «${chunkText(String(projectRef ?? ""), 60)[0]}» در فهرست فعال‌ها پیدا نشد.`);
+      return {
+        message: "این پروژه را در فهرست پروژه‌های فعال پیدا نکردم 🙏 لطفاً پروژهٔ دیگری را از فهرست انتخاب کنید.",
+        projects: projects.map(projectSummary),
+      };
+    }
+
+    console.log(`🧮 شروع تخمین قیمت | پروژه: «${project.name}» | منبع: ${source}`);
+    const result = startProjectChat(project, session, "لطفاً پروژهٔ دیگری را از فهرست انتخاب کنید.");
+    return { ...result, projects: result.project ? undefined : projects.map(projectSummary) };
+  });
+}
+
+/**
+ * ذخیرهٔ اطلاعات تماس کاربر روی نشست (بدون مکالمه و بدون مصرف سهمیهٔ AI).
+ * در مینی‌اپ، نام از پروفایل تلگرام و شماره از یک فرم تک‌فیلدی گرفته می‌شود.
+ */
+export function setContact(key, contact) {
+  const next = {};
+  const name = String(contact?.customerName ?? "").trim().slice(0, 80);
+  const phone = normalizePhone(contact?.phone);
+  if (name) next.customerName = name;
+  if (phone) next.phone = phone;
+  if (!Object.keys(next).length) return null;
+
+  const session = getSession(key);
+  session.contact = { ...session.contact, ...next };
+  return { ...session.contact };
+}
+
+// پیام «کدوم پروژه؟» برای وقتی ورودی با چند پروژه هم‌زمان می‌خواند
+function ambiguousMessage(candidates) {
+  const options = candidates.map((p) => p.name).join("\n");
+  return `منظورتون دقیقاً کدوم پروژه‌ست؟ 🙏 لطفاً اسم کامل رو بنویسید:\n\n${options}`;
+}
+
+// ── سوییچ پروژه وسط مکالمه ───────────────────────────────
+// اگر کاربر وسط چت نام پروژهٔ فعالِ دیگری را بیاورد («نارنجستان ۵ منظرم بود»)
+// مکالمه به همان پروژه سوییچ می‌شود؛ بدون این، مدلِ قیمت‌گذاریِ پروژهٔ فعلی جواب
+// بی‌ربط می‌دهد («من فقط برای پروژهٔ خودم طراحی شدم»).
+// برگشتی: { project } برای سوییچ، { ambiguous } برای پرسیدن، یا null یعنی ادامهٔ عادی.
+async function detectProjectSwitch(session, text) {
+  if (!session.project || !session.chat) return null;
+  const projects = await getActiveProjects();
+  if (!projects.length) return null;
+
+  let project;
+  try {
+    // شمارهٔ خالی («۵») جواب کاربر به سوال ربات است، نه انتخاب پروژه
+    project = matchProject(projects, text, { allowChoice: false });
+  } catch (err) {
+    if (err instanceof AmbiguousMatchError) return { ambiguous: err.candidates };
+    throw err;
+  }
+  if (!project) return null;
+  if (normalizeForMatch(project.name) === normalizeForMatch(session.project.name)) return null;
+
+  // فقط وقتی متن واقعاً «نام پروژه» است سوییچ می‌کنیم؛ اگر اسم پروژه وسط یک جملهٔ
+  // بلندِ اطلاعات فایل آمده («واحد نگین، طبقه ۳») مکالمه دست‌نخورده می‌ماند.
+  if (normalizeForMatch(text).length > normalizeForMatch(project.name).length + 12) return null;
+
+  console.log(`🔀 سوییچ پروژه | «${session.project.name}» ← «${project.name}»`);
+  return { project };
+}
+
+async function chooseProject(text, session) {
+  const projects = await getActiveProjects();
+  if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
+
+  let project;
+  try {
+    project = await findProject(text);
+  } catch (err) {
+    if (err instanceof AmbiguousMatchError) {
+      return { message: ambiguousMessage(err.candidates) };
+    }
+    throw err;
+  }
+
+  if (!project) {
     return {
-      message: `${userMessage}\n\n${others.length ? `پروژه‌های در دسترس:\n${projectListText(others)}` : ""}`,
-      projects: others,
-      keyboard: others.map((p) => p.name),
+      message: `متاسفانه «${chunkText(text, 80)[0]}» رو پیدا نکردم 🙏\nلطفاً اسم دقیق پروژه رو بنویسید.`,
     };
   }
+
+  return startProjectChat(project, session, "لطفاً اسم پروژه دیگری رو بنویسید.");
 }
 
 async function continueChat(session, text, source) {
   if (!session.chat) {
     session.state = "choosing_project";
     return chooseProject(text, session);
+  }
+
+  // کاربر ممکن است وسط مکالمه پروژهٔ دیگری را بخواهد؛ اول آن را بررسی می‌کنیم
+  const switched = await detectProjectSwitch(session, text);
+  if (switched?.ambiguous) return { message: ambiguousMessage(switched.ambiguous) };
+  if (switched?.project) {
+    return startProjectChat(switched.project, session, "لطفاً اسم پروژهٔ دیگری را بنویسید.");
   }
 
   const turn = await sendTurn(session.chat, text);
@@ -169,14 +316,12 @@ async function continueChat(session, text, source) {
   const saved = await saveLead(session, turn.lead, source);
   session.state = "followup";
   if (!saved.ok) {
-    // عمداً وضعیت را followup نگه می‌داریم تا کاربر بتواند «ثبت مجدد» بفرستد
     return { message: `${turn.reply}\n\n${saved.notice}` };
   }
   return { message: `${turn.reply}\n\n${saved.notice}${FOLLOWUP_HINT}` };
 }
 
 async function handleFollowup(session, text, source) {
-  // اگر نشست پاک شده باشد (مثلاً بعد از عمر ۲ ساعته)، کاربر را به اول مسیر برمی‌گردانیم
   if (!session.chat) {
     session.state = "choosing_project";
     return chooseProject(text, session);
@@ -187,22 +332,27 @@ async function handleFollowup(session, text, source) {
     return { message: saved.ok ? RETRY_SAVED_MESSAGE + FOLLOWUP_HINT : saved.notice };
   }
 
+  // بعد از پایان مکالمه هم کاربر می‌تواند سراغ پروژهٔ دیگری برود
+  const switched = await detectProjectSwitch(session, text);
+  if (switched?.ambiguous) return { message: ambiguousMessage(switched.ambiguous) };
+  if (switched?.project) {
+    return startProjectChat(switched.project, session, "لطفاً اسم پروژهٔ دیگری را بنویسید.");
+  }
+
   const turn = await sendTurn(session.chat, text);
 
-  // اگر کاربر نام یا شماره‌اش را اصلاح کرد، همان ردیف شیت به‌روز می‌شود (نه یک ردیف تکراری)
   if (turn.lead && session.leadRowNumber && session.savedLead) {
-    const nameChanged = turn.lead.customerName && turn.lead.customerName !== session.savedLead.customerName;
-    const phoneChanged = turn.lead.phone && turn.lead.phone.replace(/\D/g, "") !== session.savedLead.phone.replace(/\D/g, "");
-    if (nameChanged || phoneChanged) {
-      const patch = { ...session.savedLead, ...turn.lead, projectName: session.project?.name, source };
+    const patch = { ...session.savedLead, fileInfo: turn.lead.fileInfo, estimatedPrice: turn.lead.estimatedPrice, projectName: session.project?.name, source };
+    const infoChanged = turn.lead.fileInfo && turn.lead.fileInfo !== session.savedLead.fileInfo;
+    if (infoChanged) {
       try {
         await updateLead(session.leadRowNumber, patch);
         session.savedLead = patch;
-        console.log(`✏️ لید ردیف ${session.leadRowNumber} اصلاح شد (نام/شماره).`);
+        console.log(`✏️ لید ردیف ${session.leadRowNumber} اصلاح شد.`);
         return { message: `${turn.reply}\n\n✅ اطلاعات پرونده‌تون به‌روز شد.` };
       } catch (err) {
         console.error("❌ به‌روزرسانی لید ناموفق بود:", err.message);
-        notifyAdmin(`🚨 اصلاح لید ردیف ${session.leadRowNumber} ناموفق بود: ${err.message}\nنام: ${patch.customerName}\nتماس: ${patch.phone}`);
+        notifyAdmin(`🚨 اصلاح لید ردیف ${session.leadRowNumber} ناموفق بود: ${err.message}`);
         return { message: `${turn.reply}\n\n⚠️ اصلاح اطلاعات ثبت نشد؛ لطفاً با دفتر تماس بگیرید.` };
       }
     }
@@ -211,38 +361,56 @@ async function handleFollowup(session, text, source) {
   return { message: `${turn.reply}${turn.reply.includes("شروع مجدد") ? "" : FOLLOWUP_HINT}` };
 }
 
+// پروژهٔ جاری نشست را به پاسخ اضافه می‌کند تا کلاینت (سربرگ چت مینی‌اپ) بداند
+// مکالمه دربارهٔ کدام پروژه است. اگر نتیجه خودش project دارد، همان اولویت دارد.
+function attachProject(session, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.project !== undefined) return result;
+  return session.project ? { project: projectSummary(session.project), ...result } : result;
+}
+
 // پردازش یک پیام کاربر
-// key: شناسه یکتا (مثل "telegram:123" یا "web:abc") | text: متن کاربر | source: "تلگرام" یا "لندینگ‌پیج"
-export function handleUserMessage(key, text, source) {
+// key: شناسه یکتا (مثل "telegram:123"، "web:abc" یا "miniapp:123") | text: متن کاربر
+// source: "تلگرام"، "لندینگ‌پیج" یا "مینی‌اپ تلگرام"
+// contact: (اختیاری) { customerName, phone } - وقتی این اطلاعات از قبل جمع‌آوری شده (مثلاً از دکمه تلگرام)
+export function handleUserMessage(key, text, source, contact) {
   return withSessionLock(key, async () => {
     const session = getSession(key);
+    if (contact && (contact.customerName || contact.phone)) {
+      session.contact = { ...session.contact, ...contact };
+    }
     const clean = String(text ?? "").trim();
 
     if (!clean) return { message: "لطفاً پیام‌تون رو بنویسید تا راهنمایی‌تون کنم." };
     if (clean.length > 4000) return { message: "پیام‌تون خیلی بلند بود 🙏 لطفاً کوتاه‌تر و خلاصه‌تر بنویسید." };
 
-    if (isRestartCommand(clean)) return await startOver(key);
+    if (isRestartCommand(clean)) return await startOver(key, session.contact);
 
     try {
-      if (session.state === "choosing_project") return await chooseProject(clean, session);
-      if (session.state === "followup") return await handleFollowup(session, clean, source);
-      return await continueChat(session, clean, source);
+      if (session.state === "choosing_project") return attachProject(session, await chooseProject(clean, session));
+      if (session.state === "followup") return attachProject(session, await handleFollowup(session, clean, source));
+      return attachProject(session, await continueChat(session, clean, source));
     } catch (err) {
       console.error(`❌ [${key}] خطا در پردازش پیام:`, err.message || err);
       const userMessage = err instanceof AiError ? err.userMessage : "متاسفانه خطایی پیش اومد 🙏 لطفاً دوباره امتحان کنید.";
-      // اگر نشست خراب شده (chat ندارد) کاربر را به اول مسیر برمی‌گردانیم
       if (!session.chat) {
         session.state = "choosing_project";
         return { message: `${userMessage}\n\n«شروع مجدد» را بفرستید تا از اول شروع کنیم.` };
       }
-      return { message: userMessage };
+      return attachProject(session, { message: userMessage });
     }
   });
 }
 
-export async function startOver(key) {
+// contact: (اختیاری) { customerName, phone } برای حفظ اطلاعات تماس بعد از شروع مجدد
+export async function startOver(key, contact) {
   resetSession(key);
-  getSession(key);
+  const session = getSession(key);
+  if (contact && (contact.customerName || contact.phone)) {
+    session.contact = { ...contact };
+  }
+  session.state = "choosing_project";
   const welcome = await getWelcomeMessage();
-  return { ...welcome, keyboard: welcome.projects?.map((p) => p.name) ?? null, removeKeyboard: false };
+  // project: null یعنی مکالمهٔ جاری پاک شده و سربرگ چت مینی‌اپ باید خالی شود
+  return { ...welcome, project: null, removeKeyboard: true };
 }

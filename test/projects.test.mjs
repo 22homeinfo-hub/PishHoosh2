@@ -39,3 +39,13 @@ test("ورودی بی‌ربط پروژه‌ای برنمی‌گرداند", () 
   assert.equal(matchProject(PROJECTS, ""), null);
   assert.equal(matchProject([], "1"), null);
 });
+
+test("allowChoice=false شمارهٔ خالی را انتخاب پروژه تفسیر نمی‌کند", () => {
+  // برای سوییچ پروژه وسط مکالمه: جواب عددی کاربر به سوال ربات («۲») نباید
+  // اشتباهاً پروژهٔ دوم را برگرداند
+  assert.equal(matchProject(PROJECTS, "2").name, PROJECTS[1].name);
+  assert.equal(matchProject(PROJECTS, "2", { allowChoice: false }), null);
+  assert.equal(matchProject(PROJECTS, "گزینه 3", { allowChoice: false }), null);
+  // ولی تطبیق نامی سر جایش است
+  assert.equal(matchProject(PROJECTS, "نگین", { allowChoice: false }).name, "ساختمان نگین");
+});

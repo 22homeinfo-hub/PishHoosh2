@@ -7,17 +7,43 @@
 // ۴) کیبورد پیشنهادی با اسم پروژه‌ها نمایش داده می‌شود تا کاربر مجبور نباشد اسم را تایپ کند.
 // ۵) هندلر خطای عمومی بات ثبت شده تا یک خطای پیش‌بینی‌نشده کل پروسه را نکشد.
 // ۶) در گروه‌ها فقط وقتی ربات mention شود پاسخ می‌دهد (جلوگیری از مصرف بی‌رویه سهمیه).
+// ۷) [جدید] قبل از هر چیزی، از کاربر با یک دکمه اختصاصی تلگرام (request_contact) خواسته
+//    می‌شود شماره‌اش را به اشتراک بگذارد. این کار خودکار و بدون تایپ انجام می‌شود.
+//    بعد از دریافت شماره، دیگر در طول مکالمه اسم/شماره پرسیده نمی‌شود مگر کاربر خودش
+//    بخواهد آن را عوض کند.
+// ۸) [جدید] اتصال مینی‌اپ تلگرام: آدرس مینی‌اپ برای دستور /app و گزارش تشخیصی
+//    استفاده می‌شود. ورودی مینی‌اپ در تلگرام (دکمهٔ منو) دستی در BotFather مدیریت
+//    می‌شود؛ این ماژول هیچ‌وقت دکمه‌ای ست یا بازنویسی نمی‌کند و زیر پیام‌ها هم
+//    دکمهٔ ورود به مینی‌اپ نمی‌گذارد.
 
 import "./env.js";
 import TelegramBot from "node-telegram-bot-api";
-import { handleUserMessage, startOver } from "./conversation.js";
+import { handleUserMessage, startOver, getWelcomeMessage } from "./conversation.js";
+import { getSession, resetSession } from "./sessions.js";
 import { setNotifier } from "./notify.js";
 import { chunkText } from "./text.js";
+import { setMiniAppRegistration, resolveMiniAppUrl } from "./miniapp.js";
 
 const TELEGRAM_MAX_LENGTH = 4096;
 const ALLOW_GROUP_CHATS = String(process.env.ALLOW_GROUP_CHATS || "false").toLowerCase() === "true";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID?.trim() || null;
 const SOURCE_LABEL = "تلگرام";
+
+// ── مینی‌اپ تلگرام ────────────────────────────────────────
+// آدرس عمومی و HTTPS مینی‌اپ فقط برای «نمایش/تشخیص» استفاده می‌شود (دستور /app و
+// گزارش /api/miniapp-status). ورودی مینی‌اپ در تلگرام (دکمهٔ منو کنار کادر نوشتن)
+// دستی در BotFather مدیریت می‌شود؛ این سرویس هیچ‌وقت دکمهٔ منو را ست یا بازنویسی
+// نمی‌کند و زیر پیام‌ها هم دکمهٔ ورود به مینی‌اپ نمی‌گذارد.
+const { url: MINI_APP_URL, source: MINI_APP_URL_SOURCE } = resolveMiniAppUrl();
+
+const CONTACT_REQUEST_TEXT =
+  "سلام 🌷 من پیش‌هوش هستم، دستیار هوشمند دفتر املاک دیار.\n\nبرای شروع، لطفاً با دکمه زیر شماره تماستون رو با من به اشتراک بذارید 👇";
+
+const CONTACT_BUTTON_MARKUP = {
+  keyboard: [[{ text: "📱 اشتراک‌گذاری شماره تماس", request_contact: true }]],
+  resize_keyboard: true,
+  one_time_keyboard: true,
+};
 
 // نشانگر تایپینگ را تا وقتی کار تمام نشده زنده نگه می‌دارد
 function keepTyping(bot, chatId) {
@@ -46,19 +72,33 @@ function keyboardMarkup(names) {
 async function reply(bot, chatId, result) {
   const text = String(result?.message ?? "").trim();
   if (!text) {
-    // هرگز پیام خالی به تلگرام نمی‌فرستیم
     return bot.sendMessage(chatId, "متاسفانه پاسخی تولید نشد 🙏 لطفاً دوباره امتحان کنید.");
   }
 
   let replyMarkup;
-  if (result.removeKeyboard) replyMarkup = { remove_keyboard: true };
-  else if (result.keyboard?.length) replyMarkup = keyboardMarkup(result.keyboard);
+  if (result.keyboard?.length) replyMarkup = keyboardMarkup(result.keyboard);
+  // وقتی قرار است کیبورد حذف شود و مینی‌اپ فعال باشد، به‌جای remove_keyboard یک
+  // دکمهٔ ورود به مینی‌اپ زیر پیام می‌گذاریم. این کار امن است چون تنها کیبورد
+  // ماندگاری که بات می‌سازد «اشتراک شماره» با one_time_keyboard است و قبل از این
+  // پیام با «ممنون 🙏 شماره‌تون ثبت شد» جمع شده است.
+  // چرا؟ چون خیلی از کاربرها (از جمله خودتان) قبلاً شماره را به اشتراک گذاشته‌اند و
+  // دیگر آن پیام خوش‌آمدِ اول را نمی‌بینند؛ پس دکمهٔ مینی‌اپ باید سر راهِ هر /start باشد.
+  else if (result.removeKeyboard) replyMarkup = { remove_keyboard: true };
 
   const chunks = chunkText(text, TELEGRAM_MAX_LENGTH - 100);
   for (let i = 0; i < chunks.length; i++) {
     const isLast = i === chunks.length - 1;
     await bot.sendMessage(chatId, chunks[i], isLast && replyMarkup ? { reply_markup: replyMarkup } : {});
   }
+}
+
+// آیا این کاربر قبلاً شماره‌اش را به اشتراک گذاشته؟
+function hasContact(session) {
+  return Boolean(session.contact?.phone);
+}
+
+async function askForContact(bot, chatId) {
+  await bot.sendMessage(chatId, CONTACT_REQUEST_TEXT, { reply_markup: CONTACT_BUTTON_MARKUP });
 }
 
 export function startTelegramBot() {
@@ -71,7 +111,6 @@ export function startTelegramBot() {
   const bot = new TelegramBot(token, { polling: { interval: 300, timeout: 20 } });
   let botId = null;
 
-  // اطلاع‌رسانی به مدیر (اگر ADMIN_CHAT_ID تنظیم شده باشد)
   if (ADMIN_CHAT_ID) {
     setNotifier(async (message) => {
       for (const chunk of chunkText(message, TELEGRAM_MAX_LENGTH - 100)) {
@@ -95,7 +134,7 @@ export function startTelegramBot() {
     const key = `telegram:${chatId}`;
     const stopTyping = keepTyping(bot, chatId);
     try {
-      const result = text ? await handleUserMessage(key, text, SOURCE_LABEL) : await startOver(key);
+      const result = text ? await handleUserMessage(key, text, SOURCE_LABEL) : await startOver(key, getSession(key).contact);
       await reply(bot, chatId, result);
     } catch (err) {
       console.error("❌ خطا در پردازش پیام تلگرام:", err.message || err);
@@ -109,21 +148,91 @@ export function startTelegramBot() {
     }
   };
 
+  // دستور /start یا /restart: اگر شماره هنوز گرفته نشده، اول دکمه اشتراک شماره را نشان بده
   bot.onText(/^\/(start|restart)(@\w+)?(\s.*)?$/i, async (msg, match) => {
     if (!isUsableChat(msg)) return;
     const command = match[1].toLowerCase();
-    if (command === "restart") return runCommand(msg, "شروع مجدد");
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+
+    if (command === "restart") {
+      resetSession(key);
+      await askForContact(bot, chatId);
+      return;
+    }
+
+    const session = getSession(key);
+    if (!hasContact(session)) {
+      await askForContact(bot, chatId);
+      return;
+    }
     return runCommand(msg, null);
+  });
+
+  // دستور /app: نشانی مینی‌اپ را به‌صورت متن ساده می‌فرستد (بدون دکمهٔ inline).
+  // ورودی اصلی مینی‌اپ همان دکمهٔ منویی است که دستی در BotFather ست می‌شود؛ این
+  // دستور فقط برای پشتیبانی/تشخیص است تا آدرس همیشه در دسترس باشد.
+  bot.onText(/^\/app(@\w+)?$/i, async (msg) => {
+    if (!isUsableChat(msg)) return;
+    const chatId = msg.chat.id;
+    try {
+      if (!MINI_APP_URL) {
+        await bot.sendMessage(
+          chatId,
+          "مینی‌اپ برای این بات فعال نشده است.\n(در تنظیمات سرویس، MINI_APP_URL را روی آدرس عمومی و HTTPS بگذارید.)"
+        );
+        return;
+      }
+      await bot.sendMessage(chatId, `مینی‌اپ پیش‌هوش:\n${MINI_APP_URL}`, {
+        disable_web_page_preview: true,
+      });
+    } catch (err) {
+      console.error("❌ خطا در دستور /app:", err.message || err);
+    }
+  });
+
+  // وقتی کاربر روی دکمه «اشتراک‌گذاری شماره تماس» می‌زند، تلگرام یک پیام با msg.contact می‌فرستد
+  bot.on("contact", async (msg) => {
+    if (!isUsableChat(msg)) return;
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+    const session = getSession(key);
+
+    const phoneDigits = String(msg.contact?.phone_number || "").replace(/[^\d+]/g, "");
+    const name = [msg.contact?.first_name, msg.contact?.last_name].filter(Boolean).join(" ").trim();
+
+    session.contact = { customerName: name || session.contact?.customerName || "", phone: phoneDigits };
+    session.state = "choosing_project";
+
+    try {
+      await bot.sendMessage(chatId, "ممنون 🙏 شماره‌تون ثبت شد.", { reply_markup: { remove_keyboard: true } });
+      // خودِ پیام خوش‌آمد (از طریق reply) دکمهٔ ورود به مینی‌اپ را زیرش می‌گیرد
+      const welcome = await getWelcomeMessage();
+      await reply(bot, chatId, welcome);
+    } catch (err) {
+      console.error("❌ خطا بعد از دریافت مخاطب:", err.message || err);
+    }
   });
 
   bot.on("message", async (msg) => {
     if (!isUsableChat(msg)) return;
+    if (msg.contact) return; // در هندلر «contact» پردازش شد
     if (/^\/(start|restart)(@\w+)?/i.test(msg.text || "")) return; // در هندلر بالا پردازش شد
     if (/^\/[a-z]/i.test(msg.text || "")) return; // بقیهٔ دستورات تلگرام را نادیده می‌گیریم
 
+    const chatId = msg.chat.id;
+    const key = `telegram:${chatId}`;
+    const session = getSession(key);
+
+    // اگر شماره هنوز گرفته نشده، هر پیامی که کاربر بفرستد را نادیده بگیر و دوباره دکمه را نشان بده
+    if (!hasContact(session)) {
+      await askForContact(bot, chatId);
+      return;
+    }
+
     if (!msg.text) {
       try {
-        await bot.sendMessage(msg.chat.id, "لطفاً اطلاعات فایل رو به‌صورت متن بنویسید 🙏");
+        await bot.sendMessage(chatId, "لطفاً اطلاعات فایل رو به‌صورت متن بنویسید 🙏");
       } catch {
         /* ignore */
       }
@@ -135,7 +244,6 @@ export function startTelegramBot() {
 
   bot.on("polling_error", (err) => {
     const message = err?.message || String(err);
-    // خطای 409 یعنی یک نمونهٔ دیگر از بات هم‌زمان polling می‌کند
     if (/409|conflict/i.test(message)) {
       console.error("❌ خطای 409 تلگرام: یک نمونهٔ دیگر از همین بات در حال اجراست. فقط یک instance فعال نگه دارید.");
       return;
@@ -143,15 +251,23 @@ export function startTelegramBot() {
     console.error("خطای polling تلگرام:", message);
   });
 
-  // بدون این هندلر، هر رویداد «error» می‌تواند پروسه را بیندازد
   bot.on("error", (err) => console.error("❌ خطای عمومی بات تلگرام:", err?.message || err));
 
   bot.getMe()
-    .then((me) => {
+    .then(async (me) => {
       bot.options.username = me.username;
       botId = me.id;
       console.log(`✅ بات تلگرام فعال شد: @${me.username}`);
       if (ADMIN_CHAT_ID) console.log(`   اطلاع‌رسانی به مدیر فعال است (chat id: ${ADMIN_CHAT_ID})`);
+      if (MINI_APP_URL) console.log(`   📱 مینی‌اپ: ${MINI_APP_URL} (منبع آدرس: ${MINI_APP_URL_SOURCE})`);
+      // دکمهٔ منوی مینی‌اپ دستی در BotFather مدیریت می‌شود؛ سرویس فقط وضعیتش را
+      // گزارش می‌کند و هیچ‌وقت ست یا بازنویسی‌اش نمی‌کند.
+      setMiniAppRegistration({
+        attempted: false,
+        ok: false,
+        skipped: "دکمهٔ منوی مینی‌اپ دستی در BotFather مدیریت می‌شود",
+        botUsername: me.username,
+      });
     })
     .catch((err) => {
       console.error("❌ اتصال به تلگرام ناموفق بود (توکن یا شبکه را چک کنید):", err.message);

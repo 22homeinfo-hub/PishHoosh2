@@ -41,6 +41,8 @@ const server = app.listen(port, host, () => {
   console.log(`✅ سرور وب روی ${host}:${port} فعال شد`);
   console.log(`   مدل هوش مصنوعی: ${aiConfig.model} | سطح تفکر: ${aiConfig.thinkingLevel}`);
   console.log(`   صفحهٔ تست چت: http://localhost:${port}/demo`);
+  console.log(`   مینی‌اپ تلگرام: http://localhost:${port}/app`);
+  if (process.env.MINI_APP_URL?.trim()) console.log(`   آدرس عمومی مینی‌اپ (MINI_APP_URL): ${process.env.MINI_APP_URL.trim()}`);
 });
 
 // پیش‌بارگذاری پروژه‌ها تا اولین پیام کاربر معطل خواندن شیت نماند
