@@ -470,6 +470,10 @@ test("GET /api/miniapp-status گزارش تشخیص را برمی‌گرداند
     assert.equal(data.telegram.bot.username, "diyar_bot");
     assert.equal(data.telegram.menuButton.type, "web_app");
     assert.equal(data.config.url, "https://diyar.up.railway.app/app");
+    // مهر نسخه: با همین می‌شود فهمید کدام نسخه دیپلوی شده است
+    assert.match(data.build.version, /^\d+\.\d+\.\d+$/);
+    assert.match(data.build.miniapp, /^[0-9a-f]{8}$/);
+    assert.ok(data.build.startedAt);
     // توکن بات هرگز در پاسخ لو نمی‌رود
     assert.ok(!JSON.stringify(data).includes("DIAGNOSE-ENDPOINT"));
   } finally {

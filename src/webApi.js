@@ -14,6 +14,8 @@
 import "./env.js";
 import express from "express";
 import cors from "cors";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -36,6 +38,41 @@ const RATE_MAX_PER_IP = Number(process.env.RATE_LIMIT_IP_PER_MINUTE) || 60;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, "..", "public");
+
+// ── مهر نسخه ─────────────────────────────────────────────
+// برای اینکه بشود فهمید «روی سرور واقعاً کدام نسخه است»، نسخهٔ package.json به
+// همراه اثر انگشتِ خودِ miniapp.html گزارش می‌شود. اگر این مهر با چیزی که انتظار
+// دارید یکی نباشد، یعنی دیپلوی انجام نشده (یا شاخهٔ دیگری دیپلوی می‌شود) — نه
+// اینکه تغییرات در رابط دیده نمی‌شوند. اثر انگشت خودش از روی فایل ساخته می‌شود،
+// پس هیچ‌وقت قدیمی نمی‌ماند و نیاز به به‌روزرسانی دستی ندارد.
+const STARTED_AT = new Date().toISOString();
+
+function readBuildStamp() {
+  let version = "unknown";
+  let miniapp = "unknown";
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "utf8")).version ?? "unknown";
+  } catch {
+    /* package.json در دسترس نبود؛ همان unknown می‌ماند */
+  }
+  try {
+    const html = fs.readFileSync(path.join(publicDir, "miniapp.html"), "utf8");
+    miniapp = crypto.createHash("sha1").update(html).digest("hex").slice(0, 8);
+  } catch {
+    miniapp = "not-found";
+  }
+  return {
+    version,
+    // اثر انگشت کوتاهِ صفحهٔ مینی‌اپی که سرور الان سرو می‌کند
+    miniapp,
+    deployment: process.env.RAILWAY_DEPLOYMENT_ID ?? null,
+    commit: process.env.GIT_COMMIT ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? null,
+    branch: process.env.RAILWAY_GIT_BRANCH ?? process.env.GIT_BRANCH ?? null,
+    startedAt: STARTED_AT,
+  };
+}
+
+const BUILD = readBuildStamp();
 
 function createLimiter(windowMs, max) {
   const hits = new Map();
@@ -148,6 +185,8 @@ export function createWebApp() {
         hints: report.hints,
         config: report.config,
         registration: report.registration,
+        // مهر نسخه: برای فهمیدن اینکه «الان کدام نسخه دیپلوی شده است»
+        build: BUILD,
         telegram: {
           bot: report.telegram?.me?.ok
             ? { username: report.telegram.me.result?.username, id: report.telegram.me.result?.id }
