@@ -1,0 +1,1477 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>پیش‌هوش | دفتر املاک دیار</title>
+    <!-- SDK رسمی مینی‌اپ تلگرام. داخل تلگرام مقدار می‌گیرد و بیرون از آن بی‌ضرر است. -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      /* ── تم ─────────────────────────────────────────────
+         رنگ‌ها مستقیماً از تم خود تلگرام می‌آیند (--tg-theme-*)، پس مینی‌اپ در حالت
+         روشن و تاریک و با رنگ دلخواه کاربر، هم‌شکل با خود تلگرام دیده می‌شود.
+         مقدارهای دوم فقط برای باز شدن صفحه در مرورگر معمولی (تست محلی) است. */
+      :root {
+        --bg: var(--tg-theme-secondary-bg-color, #f1f3f5);
+        --card: var(--tg-theme-section-bg-color, #ffffff);
+        --bubble: var(--tg-theme-bg-color, #ffffff);
+        --text: var(--tg-theme-text-color, #17212b);
+        --hint: var(--tg-theme-hint-color, #8a9aa8);
+        --accent: var(--tg-theme-button-color, #3390ec);
+        --accent-text: var(--tg-theme-button-text-color, #ffffff);
+        --sep: rgba(127, 127, 127, 0.16);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Tahoma, "Vazirmatn", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        overscroll-behavior: none;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      button,
+      input {
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
+      }
+      .hidden {
+        display: none !important;
+      }
+
+      /* ── صفحه‌ها ──────────────────────────────────────── */
+      #screens {
+        flex: 1 1 auto;
+        position: relative;
+        min-height: 0;
+      }
+      .screen {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .head {
+        flex: 0 0 auto;
+        padding: 14px 16px 10px;
+        padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      }
+      .head h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+      }
+      .head p {
+        margin: 2px 0 0;
+        color: var(--hint);
+        font-size: 13px;
+      }
+      .scroll {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 16px 16px;
+      }
+
+      /* ── کارت پروژه ─────────────────────────────────── */
+      .cards {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 16px;
+        padding: 14px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        transition: transform 0.12s ease, opacity 0.12s ease;
+        /* ساخت‌وساز: کارت‌ها مثل طبقه‌های یک ساختمان، یکی‌یکی از پایین بالا می‌آیند.
+           نوبت هر کارت را --i می‌سازد (renderProjects). هنگام جست‌وجو --i صفر
+           می‌شود و مدت هم کوتاه‌تر تا لیست زیر تایپ کردن «کِش» نیاید. */
+        animation: rise 0.36s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+        animation-delay: calc(var(--i, 0) * 45ms);
+      }
+      .cards.is-quick .card {
+        animation-duration: 0.18s;
+      }
+      .card:active {
+        transform: scale(0.985);
+        opacity: 0.85;
+      }
+      .card-main {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .card-name {
+        display: block;
+        font-weight: 600;
+        font-size: 16px;
+      }
+      .card-fields {
+        display: block;
+        color: var(--hint);
+        font-size: 12.5px;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-cta {
+        flex: 0 0 auto;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .card-cta svg {
+        width: 16px;
+        height: 16px;
+        transition: transform 0.16s ease;
+      }
+      /* با فشار دادن کارت، فلشِ «تخمین قیمت» کمی جلو می‌رود */
+      .card:active .card-cta svg {
+        transform: translateX(-3px);
+      }
+      .search {
+        position: relative;
+        margin: 2px 0 12px;
+      }
+      .search svg {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 17px;
+        height: 17px;
+        color: var(--hint);
+        pointer-events: none;
+      }
+      .search input {
+        width: 100%;
+        border: 0;
+        border-radius: 12px;
+        background: var(--card);
+        padding: 10px 38px;
+        outline: none;
+        color: var(--text);
+        -webkit-appearance: none;
+        appearance: none;
+        transition: box-shadow 0.18s ease;
+      }
+      /* هنگام تایپ، کادر با رنگ خود تلگرام حلقه می‌گیرد و ذره‌بین رنگی می‌شود */
+      .search:focus-within input {
+        box-shadow: inset 0 0 0 1.5px var(--accent);
+      }
+      .search svg {
+        transition: color 0.18s ease;
+      }
+      .search:focus-within svg {
+        color: var(--accent);
+      }
+      .search input::placeholder {
+        color: var(--hint);
+      }
+      /* دکمهٔ «ضربدر» خودِ مرورگر حذف می‌شود؛ خودمان یکی می‌گذاریم که در اندروید هم باشد */
+      .search input::-webkit-search-cancel-button,
+      .search input::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .search-clear {
+        position: absolute;
+        left: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 26px;
+        height: 26px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--bg);
+        color: var(--hint);
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .status {
+        text-align: center;
+        color: var(--hint);
+        font-size: 13.5px;
+        padding: 34px 12px;
+      }
+      .status button {
+        margin-top: 10px;
+        border: 0;
+        background: var(--accent);
+        color: var(--accent-text);
+        border-radius: 10px;
+        padding: 8px 18px;
+        cursor: pointer;
+      }
+
+      /* ── چت ─────────────────────────────────────────── */
+      .chat-head {
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--sep);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .chat-head .titles {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .chat-head h1 {
+        font-size: 17px;
+      }
+      .chat-head p {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ghost {
+        flex: 0 0 auto;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 6px 4px;
+      }
+      .log {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 14px 16px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .msg {
+        max-width: 84%;
+        padding: 9px 13px;
+        border-radius: 16px;
+        font-size: 14.5px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      /* هر حباب از سمت خودش می‌آید: ربات از راست، کاربر از چپ */
+      .bot {
+        align-self: flex-start;
+        background: var(--bubble);
+        border-bottom-right-radius: 5px;
+        animation: fromRight 0.2s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+      .me {
+        align-self: flex-end;
+        background: var(--accent);
+        color: var(--accent-text);
+        border-bottom-left-radius: 5px;
+        animation: fromLeft 0.2s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+      .sys {
+        align-self: center;
+        background: transparent;
+        color: var(--hint);
+        font-size: 12.5px;
+        text-align: center;
+        padding: 2px 8px;
+        animation: rise 0.2s ease backwards;
+      }
+      .typing {
+        align-self: flex-start;
+        background: var(--bubble);
+        border-radius: 16px;
+        border-bottom-right-radius: 5px;
+        padding: 13px 15px;
+        display: flex;
+        gap: 4px;
+      }
+      .typing i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--hint);
+        animation: blink 1.1s infinite ease-in-out;
+      }
+      .typing i:nth-child(2) {
+        animation-delay: 0.18s;
+      }
+      .typing i:nth-child(3) {
+        animation-delay: 0.36s;
+      }
+      @keyframes blink {
+        0%,
+        60%,
+        100% {
+          opacity: 0.25;
+        }
+        30% {
+          opacity: 1;
+        }
+      }
+      .composer {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        padding: 8px 12px calc(8px + var(--safe-bottom));
+        border-top: 1px solid var(--sep);
+        background: var(--card);
+      }
+      .composer input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 0;
+        border-radius: 18px;
+        background: var(--bg);
+        padding: 11px 15px;
+        outline: none;
+      }
+      .composer input::placeholder {
+        color: var(--hint);
+      }
+      .send {
+        flex: 0 0 auto;
+        width: 42px;
+        height: 42px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--accent-text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: transform 0.16s ease, opacity 0.16s ease;
+      }
+      .send:active:not(:disabled) {
+        transform: scale(0.88);
+      }
+      .send:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .send svg {
+        width: 20px;
+        height: 20px;
+        transform: scaleX(-1); /* آیکون موشک/ارسال برای راست‌به‌چپ برعکس می‌شود */
+      }
+
+      /* ── نوار تب پایین ───────────────────────────────── */
+      .tabs {
+        flex: 0 0 auto;
+        display: flex;
+        position: relative;
+        background: var(--card);
+        border-top: 1px solid var(--sep);
+        padding-bottom: var(--safe-bottom);
+      }
+      /* نشانگر تب: هنگام جابه‌جایی بین بخش‌ها می‌لغزد (معاملهٔ روان!) */
+      .tabs-indicator {
+        position: absolute;
+        inset-inline-start: 0;
+        top: 0;
+        width: 50%;
+        height: 2.5px;
+        border-radius: 0 0 3px 3px;
+        background: var(--accent);
+        transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.28, 1);
+      }
+      .tabs-indicator[data-at="1"] {
+        transform: translateX(-100%);
+      }
+      .tab {
+        flex: 1 1 0;
+        border: 0;
+        background: transparent;
+        color: var(--hint);
+        padding: 8px 4px 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        cursor: pointer;
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+      .tab svg {
+        width: 22px;
+        height: 22px;
+        transition: transform 0.14s ease;
+      }
+      .tab.is-active {
+        color: var(--accent);
+      }
+      /* آیکون تبِ فعال، یک پرش کوچک می‌کند */
+      .tab.is-active svg {
+        animation: tapPop 0.34s cubic-bezier(0.3, 1.4, 0.5, 1);
+      }
+      .tab:active svg {
+        transform: scale(0.88);
+      }
+
+      /* ── برگهٔ گرفتن شمارهٔ تماس ─────────────────────── */
+      .sheet {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: flex-end;
+        background: rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+      .sheet.is-open {
+        opacity: 1;
+      }
+      .sheet-card {
+        width: 100%;
+        background: var(--card);
+        border-radius: 20px 20px 0 0;
+        padding: 18px 18px calc(18px + var(--safe-bottom));
+        transform: translateY(12px);
+        transition: transform 0.18s ease;
+      }
+      .sheet.is-open .sheet-card {
+        transform: none;
+      }
+      /* سربرگ برگه: قراردادِ کوچک + امضایی که همان لحظهٔ باز شدن نوشته می‌شود */
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .sheet-head > div {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .deal {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        color: var(--accent);
+      }
+      .deal-sign {
+        stroke-dasharray: 16;
+        stroke-dashoffset: 16;
+      }
+      .sheet.is-open .deal-sign {
+        animation: sign 0.9s 0.25s cubic-bezier(0.4, 0.1, 0.2, 1) forwards;
+      }
+      .sheet-card h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+      .sheet-card p {
+        margin: 4px 0 0;
+        color: var(--hint);
+        font-size: 13px;
+      }
+      .field {
+        margin-bottom: 10px;
+      }
+      .field label {
+        display: block;
+        font-size: 12.5px;
+        color: var(--hint);
+        margin-bottom: 4px;
+      }
+      .field input {
+        width: 100%;
+        border: 1px solid var(--sep);
+        border-radius: 12px;
+        background: var(--bg);
+        padding: 11px 13px;
+        outline: none;
+      }
+      .field input:focus {
+        border-color: var(--accent);
+      }
+      .primary {
+        position: relative;
+        width: 100%;
+        border: 0;
+        border-radius: 13px;
+        background: var(--accent);
+        color: var(--accent-text);
+        padding: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 4px;
+        transition: transform 0.14s ease;
+      }
+      .primary:active:not(:disabled) {
+        transform: scale(0.985);
+      }
+      .primary:disabled {
+        opacity: 0.5;
+      }
+      /* لحظهٔ «معامله ثبت شد»: متن کنار می‌رود و تیک کشیده می‌شود */
+      .primary-label {
+        transition: opacity 0.14s ease;
+      }
+      .primary.is-done {
+        opacity: 1;
+      }
+      .primary.is-done .primary-label {
+        opacity: 0;
+      }
+      .tick {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        width: 26px;
+        height: 26px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .tick path {
+        stroke-dasharray: 26;
+        stroke-dashoffset: 26;
+      }
+      .primary.is-done .tick {
+        opacity: 1;
+      }
+      .primary.is-done .tick path {
+        animation: sign 0.34s 0.06s ease forwards;
+      }
+      .link {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--hint);
+        font-size: 13px;
+        padding: 12px;
+        cursor: pointer;
+      }
+
+      /* ── اعلان کوچک پایین صفحه ───────────────────────── */
+      #toast {
+        position: fixed;
+        right: 16px;
+        left: 16px;
+        bottom: calc(78px + var(--safe-bottom));
+        z-index: 30;
+        background: var(--text);
+        color: var(--bg);
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-size: 13px;
+        text-align: center;
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      #toast.is-on {
+        opacity: 1;
+        transform: none;
+      }
+      #toast.is-pop {
+        animation: toastPop 0.3s cubic-bezier(0.22, 1.4, 0.4, 1);
+      }
+      @keyframes toastPop {
+        from {
+          opacity: 0;
+          transform: translateY(14px) scale(0.96);
+        }
+      }
+
+      /* ── انیمیشن‌ها ───────────────────────────────────────
+         سه موتیف کوچک و هم‌قدوقوارهٔ کارِ دفتر املاک:
+           ساخت‌وساز → کارت‌ها مثل طبقه‌ها بالا می‌آیند و در «در حال دریافت»،
+                       جرثقیل تاب می‌خورد و طبقه‌ها یکی‌یکی ساخته می‌شوند.
+           معامله    → نشانگر تب می‌لغزد، امضا پای قرارداد نوشته می‌شود و بعد
+                       از ثبت شماره، تیکِ «ثبت شد» کشیده می‌شود.
+           پول       → قیمت تخمینی در یک برچسب با سکهٔ چرخان، شمارش رقم‌ها و
+                       یک برقِ کوتاه ظاهر می‌شود.
+         همه کوتاه (زیر یک ثانیه) و بی‌صدا هستند و اگر کاربر «کاهش حرکت» را در
+         سیستم‌عاملش روشن کرده باشد، کاملاً خاموش می‌شوند. */
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+      }
+      @keyframes fromRight {
+        from {
+          opacity: 0;
+          transform: translateX(10px);
+        }
+      }
+      @keyframes fromLeft {
+        from {
+          opacity: 0;
+          transform: translateX(-10px);
+        }
+      }
+      @keyframes tapPop {
+        45% {
+          transform: translateY(-3px) scale(1.14);
+        }
+      }
+      @keyframes sign {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      /* جابه‌جایی بین دو بخش، هم‌جهت با نوار تب */
+      .screen.slide-left {
+        animation: fromLeft 0.26s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+      .screen.slide-right {
+        animation: fromRight 0.26s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+      }
+
+      /* جرثقیلِ وضعیت «در حال دریافت پروژه‌ها…» */
+      .crane {
+        display: block;
+        width: 62px;
+        height: 62px;
+        margin: 0 auto 8px;
+        color: var(--hint);
+      }
+      .crane-hook {
+        transform-box: view-box;
+        transform-origin: 40px 14px;
+        animation: sway 2.4s ease-in-out infinite;
+      }
+      @keyframes sway {
+        0%,
+        100% {
+          transform: rotate(-6deg);
+        }
+        50% {
+          transform: rotate(6deg);
+        }
+      }
+      .crane-stack rect {
+        animation: stack 1.9s ease-in-out infinite;
+      }
+      .crane-stack rect:nth-of-type(2) {
+        animation-delay: 0.2s;
+      }
+      .crane-stack rect:nth-of-type(3) {
+        animation-delay: 0.4s;
+      }
+      @keyframes stack {
+        0%,
+        100% {
+          opacity: 0.18;
+        }
+        30%,
+        78% {
+          opacity: 1;
+        }
+      }
+
+      /* برچسب قیمت */
+      .price {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin: 0 1px;
+        padding: 1px 8px 1px 6px;
+        border-radius: 999px;
+        background: rgba(127, 127, 127, 0.13);
+        color: var(--accent);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        overflow: hidden;
+        vertical-align: baseline;
+        perspective: 80px; /* برای چرخش سکه */
+      }
+      .price-coin {
+        flex: 0 0 auto;
+        width: 15px;
+        height: 15px;
+        animation: coin 0.75s cubic-bezier(0.3, 0.8, 0.3, 1) backwards;
+      }
+      @keyframes coin {
+        from {
+          opacity: 0;
+          transform: rotateY(-180deg) scale(0.5);
+        }
+      }
+      /* یک برقِ کوتاه روی برچسب، مثل برقِ اسکناس نو */
+      .price::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.32) 50%, transparent 70%);
+        transform: translateX(-130%);
+        animation: shine 0.9s 0.35s ease-out;
+        pointer-events: none;
+      }
+      @keyframes shine {
+        to {
+          transform: translateX(130%);
+        }
+      }
+
+      /* اگر کاربر «کاهش حرکت» خواسته باشد، هیچ‌چیز تکان نمی‌خورد */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-delay: 0ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="screens">
+      <!-- ══ بخش ۱: پروژه‌ها ══════════════════════════════ -->
+      <section class="screen" id="screen-projects">
+        <header class="head">
+          <h1>پروژه‌ها</h1>
+          <p>روی هر پروژه بزنید تا تخمین قیمتش را بگیرید</p>
+        </header>
+        <div class="scroll">
+          <div class="search" id="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+            </svg>
+            <input id="search" type="search" placeholder="جست‌وجوی پروژه…" autocomplete="off" enterkeyhint="search" />
+            <button class="search-clear hidden" id="search-clear" type="button" aria-label="پاک کردن جست‌وجو">✕</button>
+          </div>
+          <ul class="cards" id="cards"></ul>
+          <div class="status hidden" id="projects-status"></div>
+        </div>
+      </section>
+
+      <!-- ══ بخش ۲: چت با همان ربات ══════════════════════ -->
+      <section class="screen hidden" id="screen-chat">
+        <header class="head chat-head">
+          <div class="titles">
+            <h1>پیش‌هوش</h1>
+            <p id="chat-sub">دستیار تخمین قیمت دفتر املاک دیار</p>
+          </div>
+          <button class="ghost hidden" id="restart" type="button">شروع مجدد</button>
+        </header>
+        <div class="log" id="log"></div>
+        <form class="composer" id="composer">
+          <input id="input" placeholder="پیام‌تان را بنویسید…" autocomplete="off" enterkeyhint="send" />
+          <button class="send" id="send" type="submit" aria-label="ارسال">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4 20-7z" />
+            </svg>
+          </button>
+        </form>
+      </section>
+    </div>
+
+    <!-- ══ نوار تب ══════════════════════════════════════ -->
+    <nav class="tabs">
+      <span class="tabs-indicator" id="tabs-indicator" data-at="0" aria-hidden="true"></span>
+      <button class="tab is-active" data-view="projects" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /><path d="M9 10h.01M15 10h.01" />
+        </svg>
+        <span>پروژه‌ها</span>
+      </button>
+      <button class="tab" data-view="chat" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.6-.7L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z" />
+        </svg>
+        <span>چت</span>
+      </button>
+    </nav>
+
+    <!-- ══ برگهٔ شمارهٔ تماس ═══════════════════════════ -->
+    <div class="sheet hidden" id="sheet">
+      <div class="sheet-card">
+        <div class="sheet-head">
+          <!-- قراردادِ کوچک: بدنه ثابت است و امضا همان لحظهٔ باز شدن برگه نوشته می‌شود -->
+          <svg class="deal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+            <path d="M14 3v5h5" />
+            <path d="M8.5 12h4" />
+            <path class="deal-sign" d="M8.6 17.4c1.3-2.7 2-2.7 2.4-1 .3 1.3 1 1.5 1.6.2.5-1.1 1.1-1.3 1.7-.3" />
+          </svg>
+          <div>
+            <h2>شمارهٔ تماس</h2>
+            <p>تا کارشناس دفتر دیار بتواند تخمین نهایی را با شما در میان بگذارد.</p>
+          </div>
+        </div>
+        <div class="field">
+          <label for="sheet-name">نام و نام خانوادگی</label>
+          <input id="sheet-name" type="text" placeholder="مثلاً علی رضایی" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="sheet-phone">شمارهٔ موبایل</label>
+          <input id="sheet-phone" type="tel" inputmode="tel" placeholder="۰۹۱۲۱۲۳۴۵۶۷" autocomplete="tel" />
+        </div>
+        <button class="primary" id="sheet-save" type="button">
+          <span class="primary-label">ثبت و دریافت تخمین</span>
+          <svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m4.5 12.5 5 5 10-11" />
+          </svg>
+        </button>
+        <button class="link" id="sheet-skip" type="button">فعلاً بدون شماره ادامه می‌دهم</button>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+      // ─────────────────────────────────────────────────────
+      // مینی‌اپ پیش‌هوش
+      // دو بخش: ۱) لیست پروژه‌ها ۲) چت با همان ربات (همان منطق سمت سرور).
+      // همهٔ درخواست‌ها با «مسیر نسبی» هستند تا پشت دامنهٔ Railway هم کار کنند.
+      //
+      // هویت کاربر:
+      //   داخل تلگرام  → initData (سرور امضای تلگرام را راستی‌آزمایی می‌کند و شناسهٔ
+      //                   کاربر می‌شود کلید نشست؛ پس با بستن و باز کردن مینی‌اپ،
+      //                   مکالمهٔ نیمه‌تمام از بین نمی‌رود)
+      //   مرورگر معمولی → یک sessionId تصادفی در localStorage (برای تست محلیِ /app)
+      // ─────────────────────────────────────────────────────
+
+      const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+
+      const els = {
+        screens: { projects: document.getElementById("screen-projects"), chat: document.getElementById("screen-chat") },
+        tabs: [...document.querySelectorAll(".tab")],
+        tabsIndicator: document.getElementById("tabs-indicator"),
+        cards: document.getElementById("cards"),
+        searchWrap: document.getElementById("search-wrap"),
+        search: document.getElementById("search"),
+        searchClear: document.getElementById("search-clear"),
+        status: document.getElementById("projects-status"),
+        log: document.getElementById("log"),
+        input: document.getElementById("input"),
+        send: document.getElementById("send"),
+        composer: document.getElementById("composer"),
+        restart: document.getElementById("restart"),
+        chatSub: document.getElementById("chat-sub"),
+        sheet: document.getElementById("sheet"),
+        sheetName: document.getElementById("sheet-name"),
+        sheetPhone: document.getElementById("sheet-phone"),
+        sheetSave: document.getElementById("sheet-save"),
+        sheetSkip: document.getElementById("sheet-skip"),
+        toast: document.getElementById("toast"),
+      };
+
+      const state = {
+        view: "projects",
+        projects: [],
+        project: null,
+        contact: { customerName: "", hasPhone: false },
+        busy: false,
+        pendingProject: null,
+      };
+
+      // ── جست‌وجو ────────────────────────────────────────
+      // یکسان‌سازی متن فارسی، دقیقاً با همان قاعده‌ای که سمت سرور (src/text.js)
+      // برای تطبیق نام پروژه استفاده می‌شود. چرا؟ چون کاربر در تلگرام ممکن است
+      // «پارسـيان 1» را با «ی» عربی، «ک» عربی، نیم‌فاصله یا رقم فارسی تایپ کند و
+      // جست‌وجو نباید به این اختلاف‌ها گیر بدهد.
+      const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+      const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
+
+      function toLatinDigits(text) {
+        let out = String(text ?? "");
+        for (let i = 0; i < 10; i++) {
+          out = out.split(FA_DIGITS[i]).join(String(i)).split(AR_DIGITS[i]).join(String(i));
+        }
+        return out;
+      }
+
+      function toFaDigits(text) {
+        return String(text ?? "").replace(/[0-9]/g, (d) => FA_DIGITS[Number(d)]);
+      }
+
+      function normalizeFa(value) {
+        return (
+          toLatinDigits(value)
+            // نکته: نیم‌فاصله باید «فاصله» شود، نه حذف؛ وگرنه «شهرک‌زیتون» به «شهرکزیتون»
+            // تبدیل می‌شود و با «شهرک زیتون» نمی‌خواند. به همین دلیل این دو خط
+            // عمداً جدا هستند و بازهٔ \u200B-\u200F استفاده نمی‌شود.
+            .replace(/[\u200C\u200D]/g, " ") // نیم‌فاصله و فاصلهٔ مجازی
+            .replace(/[\u200B\u200E\u200F\u2028\u2029\uFEFF]/g, "") // علامت‌های نامرئی
+            .replace(/[\u064B-\u0652\u0670\u0640]/g, "") // اعراب و «کشیده» (پارسـيان → پارسیان)
+            .replace(/[يى]/g, "ی")
+            .replace(/ك/g, "ک")
+            .replace(/[ة]/g, "ه")
+            .replace(/[أإآٱ]/g, "ا")
+            .replace(/[\u060C\u061B\u061F.,!?;:"'`~@#$%^&*_+=<>|\\/()-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase()
+        );
+      }
+
+      // جست‌وجو هم روی نام پروژه و هم روی فیلدهایش تطبیق می‌دهد، و اگر نام چند
+      // کلمه‌ای باشد هر کلمه‌اش باید پیدا شود («ساختمان نگین» با «نگین» هم می‌آید).
+      function matchesProject(project, query) {
+        if (!query) return true;
+        const haystack = normalizeFa(`${project.name} ${(project.fields || []).join(" ")}`);
+        return query.split(" ").every((word) => word && haystack.includes(word));
+      }
+
+      // ── پول: برچسب قیمت ─────────────────────────────────
+      // هر جا ربات «عدد + تومان/ریال» نوشت، همان تکه به شکل برچسب قیمت با سکهٔ
+      // چرخان و شمارش رقم‌ها نمایش داده می‌شود؛ بقیهٔ متن دست‌نخورده می‌ماند.
+      // چرا سمت کاربر؟ چون جملهٔ اعلام قیمت را هوش مصنوعی می‌نویسد و قالب ثابتی
+      // ندارد؛ این الگو فقط عددِ چسبیده به واحد پول را می‌گیرد، پس «۱۲۰ متر»
+      // اشتباهاً برچسب نمی‌خورد.
+      const PRICE_SOURCE = "([0-9۰-۹][0-9۰-۹٬،, ]*[0-9۰-۹])\\s*(تومان|ریال|﷼)";
+
+      function reduceMotion() {
+        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      }
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // چند مکث کوتاه برای دیده‌شدن انیمیشن‌ها؛ با «کاهش حرکت» صفر می‌شوند
+      function beat(ms) {
+        return wait(reduceMotion() ? 0 : ms);
+      }
+
+      function parseAmount(raw) {
+        const num = Number(toLatinDigits(raw).replace(/[٬،,\s]/g, ""));
+        return Number.isFinite(num) ? num : null;
+      }
+
+      // عدد را با همان جداکنندهٔ هزارگان و همان رقم‌های متنِ ربات می‌نویسد تا
+      // شمارش، ظاهر عدد نهایی را عوض نکند.
+      function formatLike(value, sample) {
+        const sep = /[٬،]/.test(sample) ? "٬" : ",";
+        const out = Math.round(value).toLocaleString("en-US").replace(/,/g, sep);
+        return /[۰-۹]/.test(sample) ? toFaDigits(out) : out;
+      }
+
+      function countUp(node, target, sample) {
+        // اول عددِ درست را می‌گذاریم؛ شمارش فقط آب‌رویی است و اگر نشد (کاهش
+        // حرکت، یا نبود requestAnimationFrame) همان عدد نهایی دیده می‌شود.
+        node.textContent = sample;
+        if (target === null || reduceMotion() || typeof requestAnimationFrame !== "function") return;
+        const duration = 620;
+        const start = Date.now();
+        const from = target * 0.4;
+        const step = () => {
+          const t = Math.min(1, (Date.now() - start) / duration);
+          const eased = 1 - Math.pow(1 - t, 3);
+          node.textContent = formatLike(from + (target - from) * eased, sample);
+          if (t < 1) requestAnimationFrame(step);
+          else node.textContent = sample;
+        };
+        requestAnimationFrame(step);
+      }
+
+      function priceChip(digits, unit) {
+        const chip = document.createElement("span");
+        chip.className = "price";
+        chip.innerHTML =
+          '<svg class="price-coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v8.4"/><path d="M14.6 10c0-1.1-1.2-1.9-2.6-1.9S9.4 8.9 9.4 10s1.1 1.6 2.6 2 2.6 1 2.6 2.1-1.2 1.9-2.6 1.9-2.6-.8-2.6-1.9"/></svg>';
+        const num = document.createElement("span");
+        chip.appendChild(num);
+        chip.appendChild(document.createTextNode(` ${unit}`));
+        countUp(num, parseAmount(digits), digits);
+        return chip;
+      }
+
+      // متن پیام را تکه می‌کند: تکه‌های قیمت به شکل برچسب، بقیه متن ساده.
+      function fillWithPrices(node, text) {
+        const re = new RegExp(PRICE_SOURCE, "g");
+        let last = 0;
+        let found = false;
+        let m;
+        while ((m = re.exec(text))) {
+          if (m.index > last) node.appendChild(document.createTextNode(text.slice(last, m.index)));
+          node.appendChild(priceChip(m[1], m[2]));
+          last = m.index + m[0].length;
+          found = true;
+        }
+        if (last < text.length) node.appendChild(document.createTextNode(text.slice(last)));
+        // لحظهٔ اعلام قیمت، یک لرزش ملایم هم دارد
+        if (found) haptic("success");
+        return found;
+      }
+
+      // ── هویت ───────────────────────────────────────────
+      function localSessionId() {
+        const KEY = "pishhoosh.miniapp.sid";
+        let sid = localStorage.getItem(KEY);
+        if (!sid) {
+          sid =
+            (crypto.randomUUID && crypto.randomUUID()) ||
+            `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          localStorage.setItem(KEY, sid);
+        }
+        return sid;
+      }
+
+      function identity() {
+        // initData در طول عمر صفحه ثابت است؛ هر بار از خود تلگرام می‌خوانیمش
+        if (tg && tg.initData) return { initData: tg.initData };
+        return { sessionId: localSessionId() };
+      }
+
+      async function api(path, body) {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...identity(), ...(body || {}) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(data.error || `خطای سرور (${res.status})`);
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      }
+
+      // ── تلگرام ─────────────────────────────────────────
+      function haptic(kind) {
+        try {
+          const h = tg && tg.HapticFeedback;
+          if (!h) return;
+          if (kind === "success" || kind === "error" || kind === "warning") h.notificationOccurred(kind);
+          else h.impactOccurred(kind || "light");
+        } catch {
+          /* بی‌صدا نادیده می‌گیریم؛ بازخورد لمسی حیاتی نیست */
+        }
+      }
+
+      function setupTelegram() {
+        if (!tg || !tg.initData) return;
+        try {
+          tg.ready();
+          tg.expand();
+          const theme = tg.themeParams || {};
+          if (tg.setHeaderColor) tg.setHeaderColor(theme.secondary_bg_color || "#f1f3f5");
+          if (tg.setBackgroundColor) tg.setBackgroundColor(theme.secondary_bg_color || "#f1f3f5");
+          tg.disableVerticalSwipes && tg.disableVerticalSwipes();
+        } catch {
+          /* نسخهٔ قدیمی تلگرام؛ بدون اینها هم مینی‌اپ کار می‌کند */
+        }
+      }
+
+      // دکمهٔ «بازگشت» تلگرام: از چت به پروژه‌ها، و از برگهٔ شماره به بیرون
+      function setupBackButton() {
+        const back = tg && tg.BackButton;
+        if (!back) return;
+        back.onClick(() => {
+          if (!els.sheet.classList.contains("hidden")) return closeSheet();
+          if (state.view === "chat") return showView("projects");
+        });
+      }
+
+      function syncBackButton() {
+        const back = tg && tg.BackButton;
+        if (!back) return;
+        const needed = !els.sheet.classList.contains("hidden") || state.view === "chat";
+        try {
+          needed ? back.show() : back.hide();
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // ── نمایش بخش‌ها ───────────────────────────────────
+      function showView(name) {
+        const previous = state.view;
+        state.view = name;
+        for (const [key, screen] of Object.entries(els.screens)) screen.classList.toggle("hidden", key !== name);
+        els.tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.view === name));
+        els.tabsIndicator.dataset.at = name === "chat" ? "1" : "0";
+
+        // صفحه هم‌جهت با نوار تب می‌لغزد: «چت» از چپ می‌آید، «پروژه‌ها» از راست
+        if (previous !== name) {
+          const screen = els.screens[name];
+          screen.classList.remove("slide-left", "slide-right");
+          void screen.offsetWidth; // تا انیمیشن از نو اجرا شود
+          screen.classList.add(name === "chat" ? "slide-left" : "slide-right");
+        }
+        if (name === "chat") {
+          scrollLog();
+          // کمی صبر می‌کنیم تا اگر برگهٔ شمارهٔ تماس در حال بسته‌شدن است، انیمیشنش تمام شود
+          setTimeout(() => els.input.focus(), 200);
+        }
+        syncBackButton();
+      }
+
+      function scrollLog() {
+        requestAnimationFrame(() => {
+          els.log.scrollTop = els.log.scrollHeight;
+        });
+      }
+
+      function toast(message) {
+        els.toast.textContent = message;
+        els.toast.classList.add("is-on");
+        // اگر اعلان قبلی هنوز روی صفحه بود، انیمیشن ورود از نو اجرا شود
+        els.toast.classList.remove("is-pop");
+        void els.toast.offsetWidth;
+        els.toast.classList.add("is-pop");
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => els.toast.classList.remove("is-on"), 3200);
+      }
+
+      // ── چت ─────────────────────────────────────────────
+      function bubble(text, who) {
+        const div = document.createElement("div");
+        div.className = `msg ${who}`;
+        // در پیام‌های ربات، قیمت به شکل برچسبِ متحرک درمی‌آید
+        if (who === "bot") fillWithPrices(div, String(text ?? ""));
+        else div.textContent = text;
+        els.log.appendChild(div);
+        scrollLog();
+        return div;
+      }
+
+      function setTyping(on) {
+        let el = document.getElementById("typing");
+        if (on && !el) {
+          el = document.createElement("div");
+          el.id = "typing";
+          el.className = "typing";
+          el.innerHTML = "<i></i><i></i><i></i>";
+          els.log.appendChild(el);
+          scrollLog();
+        } else if (!on && el) {
+          el.remove();
+        }
+        els.send.disabled = on;
+        state.busy = on;
+      }
+
+      function renderChatHead() {
+        if (state.project) {
+          els.chatSub.textContent = `پروژهٔ ${state.project.name}`;
+          els.restart.classList.remove("hidden");
+        } else {
+          els.chatSub.textContent = "دستیار تخمین قیمت دفتر املاک دیار";
+          els.restart.classList.add("hidden");
+        }
+      }
+
+      // ── لیست پروژه‌ها ──────────────────────────────────
+      // جرثقیلِ «در حال دریافت»: دکل و بازو ثابت‌اند، قلاب آرام تاب می‌خورد و
+      // طبقه‌های سمت راست یکی‌یکی روشن می‌شوند (انگار ساختمان ساخته می‌شود).
+      const CRANE_SVG = `<svg class="crane" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 58h56" /><path d="M16 58V14" /><path d="M9 14h39" /><path d="M16 22 9 14M16 22l7-8" />
+        <g class="crane-hook"><path d="M40 14v13" /><rect x="34.5" y="27" width="11" height="7" rx="1.5" /></g>
+        <g class="crane-stack"><rect x="47" y="50" width="11" height="8" rx="1.5" /><rect x="47" y="41.5" width="11" height="8" rx="1.5" /><rect x="47" y="33" width="11" height="8" rx="1.5" /></g>
+      </svg>`;
+
+      function setStatus(text, withRetry, loading) {
+        els.status.textContent = "";
+        if (!text) {
+          els.status.classList.add("hidden");
+          return;
+        }
+        els.status.classList.remove("hidden");
+        if (loading) els.status.innerHTML = CRANE_SVG;
+        els.status.appendChild(document.createTextNode(text));
+        if (withRetry) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = "تلاش دوباره";
+          btn.onclick = boot;
+          els.status.appendChild(document.createElement("br"));
+          els.status.appendChild(btn);
+        }
+      }
+
+      function renderProjects() {
+        const query = normalizeFa(els.search.value);
+        const items = state.projects.filter((p) => matchesProject(p, query));
+
+        els.cards.innerHTML = "";
+        els.searchClear.classList.toggle("hidden", !els.search.value);
+        // وقتی هیچ پروژه‌ای نیست، کادر جست‌وجو فقط مزاحم است
+        els.searchWrap.classList.toggle("hidden", state.projects.length === 0);
+        // هنگام تایپ، کارت‌ها بی‌درنگ و بدون نوبت جابه‌جا می‌شوند
+        els.cards.classList.toggle("is-quick", !!query);
+
+        if (!state.projects.length) {
+          setStatus("فعلاً پروژهٔ فعالی ثبت نشده است. لطفاً بعداً دوباره سر بزنید.");
+          return;
+        }
+        setStatus(null);
+        if (!items.length) {
+          setStatus(`پروژه‌ای با «${els.search.value.trim()}» پیدا نشد.`);
+          return;
+        }
+
+        items.forEach((project, index) => {
+          const li = document.createElement("li");
+          li.className = "card";
+          // نوبتِ بالا آمدن کارت؛ از ۹ به بعد همه با هم می‌آیند تا لیست طولانی
+          // معطل نماند (مقدار متغیر CSS باید رشته باشد)
+          li.style.setProperty("--i", String(query ? 0 : Math.min(index, 9)));
+
+          const main = document.createElement("div");
+          main.className = "card-main";
+          const name = document.createElement("span");
+          name.className = "card-name";
+          name.textContent = project.name;
+          const fields = document.createElement("span");
+          fields.className = "card-fields";
+          fields.textContent =
+            project.fields && project.fields.length
+              ? `برای تخمین: ${project.fields.join("، ")}`
+              : "مشخصات فایل را بپرسید";
+          main.append(name, fields);
+
+          const cta = document.createElement("span");
+          cta.className = "card-cta";
+          cta.innerHTML =
+            'تخمین قیمت<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+
+          li.append(main, cta);
+          li.onclick = () => openProject(project);
+          els.cards.appendChild(li);
+        });
+      }
+
+      // کلیک روی کارت پروژه: اگر شماره نداشته باشیم اول یک فرم کوچک نشان می‌دهیم،
+      // بعد مستقیم وارد چت همان پروژه می‌شویم (بدون تایپ کردن نام پروژه).
+      async function openProject(project) {
+        if (state.busy) return;
+        haptic("light");
+        if (!state.contact.hasPhone) {
+          openSheet(project);
+          return;
+        }
+        await startProject(project);
+      }
+
+      async function startProject(project) {
+        showView("chat");
+        setTyping(true);
+        try {
+          const data = await api("api/select", { project: project.name });
+          state.project = data.project || { name: project.name, fields: project.fields || [] };
+          renderChatHead();
+          bubble(data.message || "بفرمایید، در خدمتم.", "bot");
+          if (Array.isArray(data.projects) && data.projects.length) {
+            state.projects = data.projects;
+            renderProjects();
+          }
+        } catch (err) {
+          bubble(`⚠️ ${err.message}`, "sys");
+          haptic("error");
+          if (err.status === 403) toast("لطفاً مینی‌اپ را ببندید و دوباره باز کنید.");
+        } finally {
+          setTyping(false);
+        }
+      }
+
+      // ── برگهٔ شمارهٔ تماس ──────────────────────────────
+      function openSheet(project) {
+        state.pendingProject = project;
+        const tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+        els.sheetName.value =
+          state.contact.customerName || [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ");
+        els.sheetPhone.value = "";
+        els.sheet.classList.remove("hidden");
+        requestAnimationFrame(() => els.sheet.classList.add("is-open"));
+        syncBackButton();
+        setTimeout(() => els.sheetPhone.focus(), 260);
+      }
+
+      function closeSheet() {
+        els.sheet.classList.remove("is-open");
+        setTimeout(() => els.sheet.classList.add("hidden"), 180);
+        state.pendingProject = null;
+        syncBackButton();
+      }
+
+      async function saveContact() {
+        const phone = els.sheetPhone.value.trim();
+        const name = els.sheetName.value.trim();
+        if (!phone) {
+          haptic("error");
+          els.sheetPhone.focus();
+          toast("شمارهٔ موبایل را بنویسید.");
+          return;
+        }
+
+        els.sheetSave.disabled = true;
+        try {
+          const data = await api("api/contact", { customerName: name, phone });
+          state.contact = data.contact || { customerName: name, hasPhone: true };
+          haptic("success");
+          // پیش از بسته‌شدن برگه، تیکِ «معامله ثبت شد» کشیده می‌شود
+          els.sheetSave.classList.add("is-done");
+          await beat(430);
+          els.sheetSave.classList.remove("is-done");
+          const project = state.pendingProject;
+          els.sheet.classList.remove("is-open");
+          setTimeout(() => els.sheet.classList.add("hidden"), 180);
+          state.pendingProject = null;
+          syncBackButton();
+          if (project) await startProject(project);
+        } catch (err) {
+          haptic("error");
+          toast(err.message);
+        } finally {
+          els.sheetSave.disabled = false;
+          els.sheetSave.classList.remove("is-done");
+        }
+      }
+
+      // «فعلاً بدون شماره»: مکالمه شروع می‌شود و لید بدون شماره ثبت می‌شود؛
+      // ربات در پایان از کاربر می‌خواهد شماره‌اش را در همان چت بنویسد.
+      async function skipContact() {
+        const project = state.pendingProject;
+        els.sheet.classList.remove("is-open");
+        setTimeout(() => els.sheet.classList.add("hidden"), 180);
+        state.pendingProject = null;
+        syncBackButton();
+        if (project) await startProject(project);
+      }
+
+      // ── ارسال پیام چت ──────────────────────────────────
+      async function sendText(text) {
+        const clean = String(text || "").trim();
+        if (!clean || state.busy) return;
+        els.input.value = "";
+        showView("chat");
+        bubble(clean, "me");
+        setTyping(true);
+        try {
+          const data = await api("api/message", { text: clean });
+          bubble(data.message || "…", "bot");
+          if (data.project) state.project = data.project;
+          else if (data.project === null) state.project = null;
+          renderChatHead();
+          if (Array.isArray(data.projects) && data.projects.length) {
+            state.projects = data.projects;
+            renderProjects();
+          }
+        } catch (err) {
+          bubble(`⚠️ ${err.message}`, "sys");
+          haptic("error");
+          if (err.status === 403) toast("لطفاً مینی‌اپ را ببندید و دوباره باز کنید.");
+        } finally {
+          setTyping(false);
+          els.input.focus();
+        }
+      }
+
+      async function restart() {
+        if (state.busy) return;
+        haptic("light");
+        setTyping(true);
+        try {
+          await api("api/reset");
+          els.log.innerHTML = "";
+          state.project = null;
+          renderChatHead();
+          bubble("مکالمهٔ جدید شروع شد. از تب «پروژه‌ها» یک پروژه انتخاب کنید یا سؤالتان را بنویسید.", "bot");
+          showView("projects");
+        } catch (err) {
+          toast(err.message);
+        } finally {
+          setTyping(false);
+        }
+      }
+
+      // ── راه‌اندازی ─────────────────────────────────────
+      async function boot() {
+        setStatus("در حال دریافت پروژه‌ها…", false, true);
+        try {
+          const data = await api("api/state");
+          state.projects = data.projects || [];
+          state.contact = data.contact || state.contact;
+          renderProjects();
+
+          // اگر مکالمهٔ نیمه‌تمامی روی سرور باشد، همان را ادامه می‌دهیم
+          if (data.project) {
+            state.project = data.project;
+            renderChatHead();
+            bubble(
+              `گفت‌وگوی «${data.project.name}» نیمه‌تمام مانده؛ بقیهٔ اطلاعات را بنویسید تا تخمین قیمت را اعلام کنم.`,
+              "bot"
+            );
+            showView("chat");
+          } else if (!els.log.childElementCount) {
+            bubble("سلام 🌷 من پیش‌هوش هستم.\nاز پایین، «پروژه‌ها» را بزنید و یک پروژه انتخاب کنید؛ یا هر سؤالی دارید همین‌جا بنویسید.", "bot");
+          }
+        } catch (err) {
+          setStatus(`ارتباط با سرور برقرار نشد: ${err.message}`, true);
+          bubble(`⚠️ ${err.message}`, "sys");
+        }
+      }
+
+      // ── رویدادها ───────────────────────────────────────
+      els.tabs.forEach((tab) => {
+        tab.onclick = () => {
+          haptic("selection");
+          showView(tab.dataset.view);
+        };
+      });
+      els.search.oninput = renderProjects;
+      els.searchClear.onclick = () => {
+        els.search.value = "";
+        renderProjects();
+        els.search.focus();
+      };
+      els.composer.addEventListener("submit", (e) => {
+        e.preventDefault();
+        sendText(els.input.value);
+      });
+      els.input.addEventListener("focus", scrollLog);
+      els.restart.onclick = restart;
+      els.sheetSave.onclick = saveContact;
+      els.sheetSkip.onclick = skipContact;
+      els.sheet.addEventListener("click", (e) => {
+        if (e.target === els.sheet) skipContact();
+      });
+      els.sheetPhone.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") saveContact();
+      });
+      // وقتی کیبورد باز می‌شود، آخرین پیام دیده بماند
+      if (window.visualViewport) window.visualViewport.addEventListener("resize", scrollLog);
+
+      setupTelegram();
+      setupBackButton();
+      renderChatHead();
+      showView("projects");
+      boot();
+    </script>
+  </body>
+</html>

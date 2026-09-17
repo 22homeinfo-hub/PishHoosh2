@@ -23,12 +23,18 @@ test.beforeEach(() => {
   sheets.__reset();
 });
 
-test("پیام خوش‌آمد: لیست شماره‌دار و بدون undefined", async () => {
+test("پیام خوش‌آمد: درخواست اسم پروژه و بدون undefined", async () => {
   const welcome = await getWelcomeMessage();
-  assert.match(welcome.message, /1\. پارسیان ۱/);
-  assert.match(welcome.message, /2\. ساختمان نگین/);
+  assert.match(welcome.message, /خوش اومدید/);
+  assert.match(welcome.message, /اسم پروژه/);
   assert.ok(!welcome.message.includes("undefined"));
   assert.equal(welcome.projects.length, 3);
+  // لیست پروژه‌ها جدا از پیام می‌آید تا لایهٔ نمایش (کیبورد تلگرام، چیپ‌های وب،
+  // کارت‌های مینی‌اپ) خودش آن را بسازد
+  assert.deepEqual(
+    welcome.projects.map((p) => p.name),
+    ["پارسیان ۱", "ساختمان نگین", "پروژه بدون فیلد"]
+  );
 });
 
 test("انتخاب پروژه با شمارهٔ لیست کار می‌کند (بدون مصرف سهمیهٔ API)", async () => {
@@ -86,10 +92,12 @@ test("برای هر پیام کاربر فقط یک درخواست به Gemini �
 
 test("پایان مکالمه: لید با نام، شماره و قیمت ثبت می‌شود", async () => {
   gemini.doneAfter = 3;
+  // نام و شماره از قبل گرفته شده‌اند (دکمه اشتراک مخاطب تلگرام یا فرم مینی‌اپ)
+  const contact = { customerName: "علی رضایی", phone: "09121234567" };
   const { key } = await startChatWith("1");
-  await handleUserMessage(key, "۱۲۰ متر", "تلگرام");
+  await handleUserMessage(key, "۱۲۰ متر", "تلگرام", contact);
   await handleUserMessage(key, "طبقه ۵", "تلگرام");
-  const result = await handleUserMessage(key, "علی رضایی ۰۹۱۲۱۲۳۴۵۶۷", "تلگرام");
+  const result = await handleUserMessage(key, "ساخت ۱۴۰۲", "تلگرام");
 
   assert.equal(sheets.state.leads.length, 1);
   const lead = sheets.state.leads[0];
@@ -100,6 +108,16 @@ test("پایان مکالمه: لید با نام، شماره و قیمت ثب�
   assert.equal(lead.estimatedPrice, 15960000000);
   assert.equal(lead.source, "تلگرام");
   assert.match(result.message, /ثبت شد/);
+});
+
+test("اطلاعات تماس نگرفته: لید ثبت می‌شود ولی صادقانه می‌گوید نام و شماره کم است", async () => {
+  gemini.doneAfter = 1;
+  const { key } = await startChatWith("1");
+  const result = await handleUserMessage(key, "۱۲۰ متر", "تلگرام");
+
+  assert.equal(sheets.state.leads.length, 1);
+  assert.equal(sheets.state.leads[0].customerName, "");
+  assert.match(result.message, /نام و شماره تماس/);
 });
 
 test("پیام کاربر بعد از پایان مکالمه دور ریخته نمی‌شود", async () => {
@@ -115,18 +133,22 @@ test("پیام کاربر بعد از پایان مکالمه دور ریخته 
   assert.match(result.message, /سوال شمارهٔ|شروع مجدد/);
 });
 
-test("اصلاح شمارهٔ تماس، همان ردیف شیت را به‌روز می‌کند (نه ردیف تکراری)", async () => {
+test("اصلاح اطلاعات فایل، همان ردیف شیت را به‌روز می‌کند (نه ردیف تکراری)", async () => {
   gemini.doneAfter = 1;
   const { key } = await startChatWith("1");
   await handleUserMessage(key, "۱۲۰ متر", "تلگرام");
   assert.equal(sheets.state.leads.length, 1);
+  assert.equal(sheets.state.leads[0].fileInfo, "۱۲۰ متر، طبقه ۵، ساخت ۱۴۰۲");
 
-  gemini.lead.phone = "09129999999";
-  const result = await handleUserMessage(key, "شماره‌ام اشتباه بود، ۰۹۱۲۹۹۹۹۹۹۹", "تلگرام");
+  // کاربر بعد از اعلام قیمت اصلاحیه می‌دهد؛ مدل lead به‌روز‌شده را برمی‌گرداند
+  gemini.lead.fileInfo = "۱۳۰ متر، طبقه ۵، ساخت ۱۴۰۲";
+  gemini.lead.estimatedPrice = 17160000000;
+  const result = await handleUserMessage(key, "متراژ ۱۳۰ بود نه ۱۲۰", "تلگرام");
 
   assert.equal(sheets.state.leads.length, 1, "نباید ردیف جدید اضافه شود");
   assert.equal(sheets.state.updates.length, 1);
-  assert.equal(sheets.state.leads[0].phone, "09129999999");
+  assert.equal(sheets.state.leads[0].fileInfo, "۱۳۰ متر، طبقه ۵، ساخت ۱۴۰۲");
+  assert.equal(sheets.state.leads[0].estimatedPrice, 17160000000);
   assert.match(result.message, /به‌روز شد/);
 });
 
@@ -181,17 +203,20 @@ test("پروژهٔ بدون فیلد: پیام واضح به‌جای «undefine
   assert.equal(gemini.requests.length, 0);
 });
 
-test("پروژهٔ ناشناخته: لیست دوباره نمایش داده می‌شود و کیبورد پیشنهاد می‌شود", async () => {
+test("پروژهٔ ناشناخته: کاربر به نوشتن نام دقیق دعوت می‌شود", async () => {
   const result = await handleUserMessage(newKey(), "پروژه‌ای که اصلا وجود ندارد", "تلگرام");
   assert.match(result.message, /پیدا نکردم/);
-  assert.ok(Array.isArray(result.keyboard) && result.keyboard.length === 3);
+  assert.match(result.message, /اسم دقیق پروژه/);
+  // لیست شماره‌دار دیگر در پیام چاپ نمی‌شود؛ کیبورد هم فقط در تلگرام ساخته می‌شود
+  assert.equal(result.keyboard, undefined);
 });
 
 test("«شروع مجدد» نشست را صفر می‌کند", async () => {
   const { key } = await startChatWith("1");
   const result = await handleUserMessage(key, "شروع مجدد", "تلگرام");
   assert.match(result.message, /خوش اومدید/);
-  assert.equal(result.keyboard.length, 3);
+  assert.equal(result.project, null, "پروژهٔ جاری باید پاک شود");
+  assert.equal(result.projects.length, 3);
 
   const restarted = await startOver(key);
   assert.match(restarted.message, /خوش اومدید/);
@@ -217,4 +242,60 @@ test("ورودی نامعتبر کنترل می‌شود", async () => {
   const key = newKey();
   assert.match((await handleUserMessage(key, "   ", "تلگرام")).message, /بنویسید/);
   assert.match((await handleUserMessage(key, "x".repeat(5000), "تلگرام")).message, /بلند/);
+});
+
+// ── سوییچ پروژه وسط مکالمه ────────────────────────────────
+test("وسط مکالمه می‌شود پروژه را عوض کرد", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  assert.match((await handleUserMessage(key, "۱۲ متر", "تلگرام")).message, /سوال شمارهٔ 1/);
+
+  const switched = await handleUserMessage(key, "ساختمان نگین منظرم بود", "تلگرام");
+  // سلام اولیهٔ پروژهٔ جدید، بدون مصرف سهمیهٔ AI
+  assert.match(switched.message, /ساختمان نگین/);
+  assert.match(switched.message, /تعداد اتاق/);
+  assert.equal(switched.project.name, "ساختمان نگین");
+  assert.equal(gemini.requests.length, 1, "سوییچ نباید به AI فرستاده شود");
+
+  // مکالمهٔ بعدی واقعاً متعلق به پروژهٔ جدید است
+  await handleUserMessage(key, "۹۰ متر، ۲ اتاق", "تلگرام");
+  const raw = JSON.stringify(gemini.requests.at(-1).body);
+  assert.match(raw, /ساختمان نگین/);
+  assert.ok(!/پارسیان ۱/.test(raw), "پروژهٔ قبلی نباید در prompt باشد");
+});
+
+test("جواب عددی کاربر به سوال ربات، پروژه را عوض نمی‌کند", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  // «۲» اگر به عنوان «انتخاب شماره‌ای» تفسیر شود می‌شود ساختمان نگین
+  const result = await handleUserMessage(key, "۲", "تلگرام");
+  assert.match(result.message, /سوال شمارهٔ 1/, "باید به AI رفته باشد، نه سوییچ");
+  assert.equal(gemini.requests.length, 1);
+});
+
+test("اسم پروژه وسط جملهٔ بلندِ اطلاعات فایل، سوییچ نمی‌کند", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  const result = await handleUserMessage(key, "واحدم ساختمان نگین هست، طبقه ۳ و متراژ ۱۲۰", "تلگرام");
+  assert.match(result.message, /سوال شمارهٔ 1/);
+  assert.equal(gemini.requests.length, 1);
+});
+
+test("ابهام وسط مکالمه: می‌پرسد کدام پروژه", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1");
+  const result = await handleUserMessage(key, "پارسیان ۱ یا ساختمان نگین منظرم بود", "تلگرام");
+  assert.match(result.message, /کدوم پروژه/);
+  assert.match(result.message, /ساختمان نگین/);
+  assert.equal(gemini.requests.length, 0);
+});
+
+test("در prompt، سوال غیرقیمتی به کارشناسان ارجاع می‌شود", async () => {
+  const { key } = await startChatWith("1");
+  await handleUserMessage(key, "۱۲۰ متر", "تلگرام");
+  const raw = JSON.stringify(gemini.requests[0].body);
+  assert.match(raw, /کارشناسان دفتر دیار در ارتباط/);
+  assert.match(raw, /کی تحویل/);
+  // و دربارهٔ پروژهٔ دیگر هم راه درست را می‌گوید، نه «فقط برای این پروژه طراحی شدم»
+  assert.match(raw, /به‌صورت خودکار به همان پروژه سوییچ/);
 });

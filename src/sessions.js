@@ -52,6 +52,14 @@ export function resetSession(key) {
   sessions.delete(key);
 }
 
+// خواندن نشست «بدون» ساختن آن.
+// چرا لازم است؟ getSession برای هر کلید ناشناخته یک نشست جدید می‌سازد و زمان
+// آخرین فعالیتش را به‌روز می‌کند. وقتی مینی‌اپ می‌خواهد بداند کاربر قبلاً در چت بات
+// شماره‌اش را به اشتراک گذاشته یا نه، نباید یک نشست خالی و بی‌استفاده برای او بسازیم.
+export function peekSession(key) {
+  return sessions.get(key);
+}
+
 // اجرای تابع به‌صورت سریالی برای هر کاربر (جلوگیری از پردازش موازی پیام‌ها)
 export function withSessionLock(key, fn) {
   const previous = locks.get(key) ?? Promise.resolve();

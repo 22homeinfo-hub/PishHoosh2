@@ -27,16 +27,23 @@ export class AmbiguousMatchError extends Error {
  * پیدا کردن پروژه از روی متن کاربر.
  * @param {Array<{name:string}>} projects لیست پروژه‌های فعال
  * @param {string} input متن کاربر
+ * @param {{allowChoice?:boolean}} [options]
+ *   allowChoice=false یعنی «۱/۲/گزینه ۳» به عنوان انتخاب شماره‌ای تفسیر نشود؛
+ *   برای سوییچ پروژه وسط مکالمه لازم است، چون جواب کاربر به سوال ربات («۵»)
+ *   نباید اشتباهاً پروژهٔ پنجم را انتخاب کند.
  * @returns {object|null} پروژهٔ پیدا‌شده یا null
  * @throws {AmbiguousMatchError} وقتی ورودی با بیش از یک پروژه هم‌زمان تطبیق دارد
  */
-export function matchProject(projects, input) {
+export function matchProject(projects, input, options = {}) {
+  const { allowChoice = true } = options;
   if (!Array.isArray(projects) || !projects.length) return null;
   const text = String(input ?? "").trim();
   if (!text) return null;
 
-  const index = parseChoice(text, projects.length);
-  if (index !== null) return projects[index] ?? null;
+  if (allowChoice) {
+    const index = parseChoice(text, projects.length);
+    if (index !== null) return projects[index] ?? null;
+  }
 
   const needle = normalizeForMatch(text);
 
