@@ -243,3 +243,59 @@ test("ورودی نامعتبر کنترل می‌شود", async () => {
   assert.match((await handleUserMessage(key, "   ", "تلگرام")).message, /بنویسید/);
   assert.match((await handleUserMessage(key, "x".repeat(5000), "تلگرام")).message, /بلند/);
 });
+
+// ── سوییچ پروژه وسط مکالمه ────────────────────────────────
+test("وسط مکالمه می‌شود پروژه را عوض کرد", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  assert.match((await handleUserMessage(key, "۱۲ متر", "تلگرام")).message, /سوال شمارهٔ 1/);
+
+  const switched = await handleUserMessage(key, "ساختمان نگین منظرم بود", "تلگرام");
+  // سلام اولیهٔ پروژهٔ جدید، بدون مصرف سهمیهٔ AI
+  assert.match(switched.message, /ساختمان نگین/);
+  assert.match(switched.message, /تعداد اتاق/);
+  assert.equal(switched.project.name, "ساختمان نگین");
+  assert.equal(gemini.requests.length, 1, "سوییچ نباید به AI فرستاده شود");
+
+  // مکالمهٔ بعدی واقعاً متعلق به پروژهٔ جدید است
+  await handleUserMessage(key, "۹۰ متر، ۲ اتاق", "تلگرام");
+  const raw = JSON.stringify(gemini.requests.at(-1).body);
+  assert.match(raw, /ساختمان نگین/);
+  assert.ok(!/پارسیان ۱/.test(raw), "پروژهٔ قبلی نباید در prompt باشد");
+});
+
+test("جواب عددی کاربر به سوال ربات، پروژه را عوض نمی‌کند", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  // «۲» اگر به عنوان «انتخاب شماره‌ای» تفسیر شود می‌شود ساختمان نگین
+  const result = await handleUserMessage(key, "۲", "تلگرام");
+  assert.match(result.message, /سوال شمارهٔ 1/, "باید به AI رفته باشد، نه سوییچ");
+  assert.equal(gemini.requests.length, 1);
+});
+
+test("اسم پروژه وسط جملهٔ بلندِ اطلاعات فایل، سوییچ نمی‌کند", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1"); // پارسیان ۱
+  const result = await handleUserMessage(key, "واحدم ساختمان نگین هست، طبقه ۳ و متراژ ۱۲۰", "تلگرام");
+  assert.match(result.message, /سوال شمارهٔ 1/);
+  assert.equal(gemini.requests.length, 1);
+});
+
+test("ابهام وسط مکالمه: می‌پرسد کدام پروژه", async () => {
+  gemini.doneAfter = 99;
+  const { key } = await startChatWith("1");
+  const result = await handleUserMessage(key, "پارسیان ۱ یا ساختمان نگین منظرم بود", "تلگرام");
+  assert.match(result.message, /کدوم پروژه/);
+  assert.match(result.message, /ساختمان نگین/);
+  assert.equal(gemini.requests.length, 0);
+});
+
+test("در prompt، سوال غیرقیمتی به کارشناسان ارجاع می‌شود", async () => {
+  const { key } = await startChatWith("1");
+  await handleUserMessage(key, "۱۲۰ متر", "تلگرام");
+  const raw = JSON.stringify(gemini.requests[0].body);
+  assert.match(raw, /کارشناسان دفتر دیار در ارتباط/);
+  assert.match(raw, /کی تحویل/);
+  // و دربارهٔ پروژهٔ دیگر هم راه درست را می‌گوید، نه «فقط برای این پروژه طراحی شدم»
+  assert.match(raw, /به‌صورت خودکار به همان پروژه سوییچ/);
+});

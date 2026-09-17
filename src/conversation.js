@@ -238,6 +238,41 @@ export function setContact(key, contact) {
   return { ...session.contact };
 }
 
+// پیام «کدوم پروژه؟» برای وقتی ورودی با چند پروژه هم‌زمان می‌خواند
+function ambiguousMessage(candidates) {
+  const options = candidates.map((p) => p.name).join("\n");
+  return `منظورتون دقیقاً کدوم پروژه‌ست؟ 🙏 لطفاً اسم کامل رو بنویسید:\n\n${options}`;
+}
+
+// ── سوییچ پروژه وسط مکالمه ───────────────────────────────
+// اگر کاربر وسط چت نام پروژهٔ فعالِ دیگری را بیاورد («نارنجستان ۵ منظرم بود»)
+// مکالمه به همان پروژه سوییچ می‌شود؛ بدون این، مدلِ قیمت‌گذاریِ پروژهٔ فعلی جواب
+// بی‌ربط می‌دهد («من فقط برای پروژهٔ خودم طراحی شدم»).
+// برگشتی: { project } برای سوییچ، { ambiguous } برای پرسیدن، یا null یعنی ادامهٔ عادی.
+async function detectProjectSwitch(session, text) {
+  if (!session.project || !session.chat) return null;
+  const projects = await getActiveProjects();
+  if (!projects.length) return null;
+
+  let project;
+  try {
+    // شمارهٔ خالی («۵») جواب کاربر به سوال ربات است، نه انتخاب پروژه
+    project = matchProject(projects, text, { allowChoice: false });
+  } catch (err) {
+    if (err instanceof AmbiguousMatchError) return { ambiguous: err.candidates };
+    throw err;
+  }
+  if (!project) return null;
+  if (normalizeForMatch(project.name) === normalizeForMatch(session.project.name)) return null;
+
+  // فقط وقتی متن واقعاً «نام پروژه» است سوییچ می‌کنیم؛ اگر اسم پروژه وسط یک جملهٔ
+  // بلندِ اطلاعات فایل آمده («واحد نگین، طبقه ۳») مکالمه دست‌نخورده می‌ماند.
+  if (normalizeForMatch(text).length > normalizeForMatch(project.name).length + 12) return null;
+
+  console.log(`🔀 سوییچ پروژه | «${session.project.name}» ← «${project.name}»`);
+  return { project };
+}
+
 async function chooseProject(text, session) {
   const projects = await getActiveProjects();
   if (!projects.length) return { message: NO_PROJECT_MESSAGE, projects: [] };
@@ -247,10 +282,7 @@ async function chooseProject(text, session) {
     project = await findProject(text);
   } catch (err) {
     if (err instanceof AmbiguousMatchError) {
-      const options = err.candidates.map((p) => p.name).join("\n");
-      return {
-        message: `منظورتون دقیقاً کدوم پروژه‌ست؟ 🙏 لطفاً اسم کامل رو بنویسید:\n\n${options}`,
-      };
+      return { message: ambiguousMessage(err.candidates) };
     }
     throw err;
   }
@@ -268,6 +300,13 @@ async function continueChat(session, text, source) {
   if (!session.chat) {
     session.state = "choosing_project";
     return chooseProject(text, session);
+  }
+
+  // کاربر ممکن است وسط مکالمه پروژهٔ دیگری را بخواهد؛ اول آن را بررسی می‌کنیم
+  const switched = await detectProjectSwitch(session, text);
+  if (switched?.ambiguous) return { message: ambiguousMessage(switched.ambiguous) };
+  if (switched?.project) {
+    return startProjectChat(switched.project, session, "لطفاً اسم پروژهٔ دیگری را بنویسید.");
   }
 
   const turn = await sendTurn(session.chat, text);
@@ -291,6 +330,13 @@ async function handleFollowup(session, text, source) {
   if (session.pendingLead && /^(ثبت مجدد|ثبت دوباره|retry|ذخیره مجدد)$/i.test(text.trim())) {
     const saved = await saveLead(session, session.pendingLead, source);
     return { message: saved.ok ? RETRY_SAVED_MESSAGE + FOLLOWUP_HINT : saved.notice };
+  }
+
+  // بعد از پایان مکالمه هم کاربر می‌تواند سراغ پروژهٔ دیگری برود
+  const switched = await detectProjectSwitch(session, text);
+  if (switched?.ambiguous) return { message: ambiguousMessage(switched.ambiguous) };
+  if (switched?.project) {
+    return startProjectChat(switched.project, session, "لطفاً اسم پروژهٔ دیگری را بنویسید.");
   }
 
   const turn = await sendTurn(session.chat, text);
