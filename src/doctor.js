@@ -8,6 +8,7 @@ import "./env.js";
 import { describeSheets, getActiveProjects } from "./sheets.js";
 import { pingModel, aiConfig } from "./ai.js";
 import { parseNumber, splitList, normalizeForMatch } from "./text.js";
+import { resolveMiniAppUrl } from "./miniapp.js";
 
 const problems = [];
 const warnings = [];
@@ -51,14 +52,18 @@ async function checkEnv() {
   ok(`مدل هوش مصنوعی: ${aiConfig.model}`, `سطح تفکر: ${aiConfig.thinkingLevel}`);
 
   // مینی‌اپ تلگرام
-  const miniAppUrl = process.env.MINI_APP_URL?.trim();
+  const { url: miniAppUrl, source } = resolveMiniAppUrl();
   if (!miniAppUrl) {
-    warn("MINI_APP_URL تنظیم نشده", "صفحهٔ مینی‌اپ روی /app در دسترس است اما دکمهٔ ورود در تلگرام ساخته نمی‌شود");
+    warn("آدرس مینی‌اپ ساخته نشد", "نه MINI_APP_URL ست شده و نه RAILWAY_PUBLIC_DOMAIN پیدا شد؛ دکمهٔ ورود در تلگرام ساخته نمی‌شود");
+    console.log("   → روی Railway: Settings → Networking → Generate Domain (Public Networking) را روشن کنید.");
+    console.log("   → یا دستی MINI_APP_URL=https://<دامنهٔ-شما>/app را بگذارید.");
   } else if (!/^https:\/\//i.test(miniAppUrl)) {
-    warn("MINI_APP_URL باید HTTPS باشد", `مقدار فعلی: ${miniAppUrl}`);
+    warn("آدرس مینی‌اپ باید HTTPS باشد", `مقدار فعلی: ${miniAppUrl}`);
     console.log("   → تلگرام فقط آدرس https را برای مینی‌اپ می‌پذیرد (مثلاً https://your-app.up.railway.app/app).");
   } else {
-    ok("MINI_APP_URL", miniAppUrl + (/\/(app|miniapp)\/?$/.test(miniAppUrl) ? "" : " (بهتر است به /app ختم شود)"));
+    ok("آدرس مینی‌اپ", `${miniAppUrl} (منبع: ${source})`);
+    if (!/\/(app|miniapp)\/?$/.test(miniAppUrl)) console.log("   → بهتر است آدرس به /app ختم شود.");
+    console.log("   → برای بررسی وضعیت دکمه در تلگرام: GET /api/miniapp-status");
   }
 }
 

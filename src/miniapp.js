@@ -120,6 +120,36 @@ export function initDataRejectionMessage(reason) {
 // نتیجهٔ آخرین تلاش بات برای ثبت دکمهٔ منو (توسط telegram.js پر می‌شود)
 const registration = { attempted: false, ok: false, skipped: null, error: null, botUsername: null, at: null };
 
+/**
+ * ساختن آدرس مینی‌اپ.
+ *
+ * چرا این تابع؟ چون شایع‌ترین دلیل «دکمهٔ مینی‌اپ در تلگرام نمی‌آید» این است که
+ * MINI_APP_URL اصلاً در سرویس ست نشده. روی Railway نیازی به ست‌کردنش نیست:
+ * دامنهٔ عمومی سرویس در متغیر آمادهٔ RAILWAY_PUBLIC_DOMAIN هست و از همان
+ * «https://<domain>/app» ساخته می‌شود. یعنی دیپلوی روی Railway بدون هیچ تنظیم
+ * اضافه‌ای دکمهٔ مینی‌اپ را می‌سازد.
+ *
+ * @returns {{url:string, source:"MINI_APP_URL"|"RAILWAY_PUBLIC_DOMAIN"|"PUBLIC_URL"|null}}
+ */
+export function resolveMiniAppUrl(env = process.env) {
+  const clean = (value) =>
+    String(value ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+
+  const explicit = clean(env.MINI_APP_URL);
+  if (explicit) return { url: explicit, source: "MINI_APP_URL" };
+
+  const railwayDomain = clean(env.RAILWAY_PUBLIC_DOMAIN).replace(/^https?:\/\//i, "");
+  if (railwayDomain) return { url: `https://${railwayDomain}/app`, source: "RAILWAY_PUBLIC_DOMAIN" };
+
+  // برخی پلتفرم‌ها (یا ریورس‌پراکسی دستی) دامنهٔ عمومی را در این متغیرها می‌دهند
+  const publicUrl = clean(env.PUBLIC_URL || env.APP_URL || env.RENDER_EXTERNAL_URL);
+  if (publicUrl) return { url: `${publicUrl.replace(/^https?:\/\//i, "https://")}/app`, source: "PUBLIC_URL" };
+
+  return { url: "", source: null };
+}
+
 export function setMiniAppRegistration(info) {
   Object.assign(registration, info ?? {}, { at: new Date().toISOString() });
 }
@@ -130,9 +160,10 @@ export function getMiniAppRegistration() {
 
 // پیکربندی جاری مینی‌اپ از روی متغیرهای محیطی
 export function miniAppConfig() {
-  const url = String(process.env.MINI_APP_URL ?? "").trim();
+  const { url, source } = resolveMiniAppUrl();
   return {
     url,
+    source,
     isHttps: /^https:\/\//i.test(url),
     title: String(process.env.MINI_APP_TITLE?.trim() || "پیش‌هوش").slice(0, 60),
     menuButtonEnabled: String(process.env.MINI_APP_MENU_BUTTON ?? "true").toLowerCase() !== "false",
@@ -194,13 +225,15 @@ export async function diagnoseMiniApp() {
   if (!config.url) {
     return {
       ok: false,
-      verdict: "MINI_APP_URL روی سرویس تنظیم نشده؛ بنابراین بات هیچ دکمه‌ای در تلگرام نمی‌سازد.",
+      verdict: "آدرس مینی‌اپ ساخته نشد: نه MINI_APP_URL ست شده و نه دامنهٔ عمومی سرویس پیدا شد.",
       config,
       registration: reg,
       telegram: snapshot(),
       hints: [
-        "در Railway → سرویس → Variables مقدار MINI_APP_URL=https://<دامنهٔ-شما>/app را اضافه کنید و بگذارید دیپلوی شود.",
-        "تا آن موقع، آدرس /app در مرورگر کار می‌کند و دستور /app هم به بات اضافه شده است.",
+        "روی Railway لازم نیست چیزی بگذارید؛ متغیر آمادهٔ RAILWAY_PUBLIC_DOMAIN خودش استفاده می‌شود. اگر این خطا را می‌بینید یعنی Public Networking برای سرویس روشن نیست.",
+        "در Railway → سرویس → Settings → Networking یک دامنهٔ عمومی (Generate Domain) بسازید و ری‌دیپلوی کنید.",
+        "یا دستی: MINI_APP_URL=https://<دامنهٔ-شما>/app را در Variables بگذارید.",
+        "تا آن موقع صفحهٔ /app در مرورگر کار می‌کند و دستور /app هم به بات اضافه شده است.",
       ],
     };
   }

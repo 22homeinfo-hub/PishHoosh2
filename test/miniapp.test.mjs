@@ -368,12 +368,16 @@ function stubTelegram(responses, token) {
   };
 }
 
-test("diagnoseMiniApp: وقتی MINI_APP_URL ست نشده، دقیقاً همان را می‌گوید", async () => {
+test("diagnoseMiniApp: وقتی هیچ آدرسی ساخته نشود، راه‌حل را می‌گوید", async () => {
   delete process.env.MINI_APP_URL;
+  delete process.env.RAILWAY_PUBLIC_DOMAIN;
   const report = await diagnoseMiniApp();
   assert.equal(report.ok, false);
   assert.match(report.verdict, /MINI_APP_URL/);
-  assert.match(report.hints[0], /Variables/);
+  assert.match(report.verdict, /دامنهٔ عمومی/);
+  // راهنما باید هم Railway (Public Networking) و هم راه دستی را بگوید
+  assert.ok(report.hints.some((h) => /RAILWAY_PUBLIC_DOMAIN|Public Networking/.test(h)));
+  assert.ok(report.hints.some((h) => /MINI_APP_URL=https/.test(h)));
   assert.equal(miniAppConfig().url, "");
 });
 
@@ -492,5 +496,62 @@ test("diagnoseMiniApp: خطای شبکه با توکنِ بد اشتباه گر�
     globalThis.fetch = original;
     process.env.TELEGRAM_BOT_TOKEN = envToken;
     delete process.env.MINI_APP_URL;
+  }
+});
+
+// ── ۶) ساختن آدرس مینی‌اپ بدون تنظیم دستی (Railway) ──────
+const { resolveMiniAppUrl } = await import("../src/miniapp.js");
+
+test("resolveMiniAppUrl: مقدار دستی MINI_APP_URL اولویت دارد", () => {
+  assert.deepEqual(resolveMiniAppUrl({ MINI_APP_URL: "https://amlak.diyar.ir/app" }), {
+    url: "https://amlak.diyar.ir/app",
+    source: "MINI_APP_URL",
+  });
+  // فاصله و اسلش اضافی پاک می‌شود
+  assert.equal(resolveMiniAppUrl({ MINI_APP_URL: "  https://x.ir/app/  " }).url, "https://x.ir/app");
+});
+
+test("resolveMiniAppUrl: روی Railway بدون هیچ تنظیمی آدرس ساخته می‌شود", () => {
+  assert.deepEqual(resolveMiniAppUrl({ RAILWAY_PUBLIC_DOMAIN: "diyar-bot-production.up.railway.app" }), {
+    url: "https://diyar-bot-production.up.railway.app/app",
+    source: "RAILWAY_PUBLIC_DOMAIN",
+  });
+  // اگر دامنه با https یا اسلش ذخیره شده باشد هم درست کار می‌کند
+  assert.equal(
+    resolveMiniAppUrl({ RAILWAY_PUBLIC_DOMAIN: "https://diyar.up.railway.app/" }).url,
+    "https://diyar.up.railway.app/app"
+  );
+});
+
+test("resolveMiniAppUrl: دامنهٔ عمومی پلتفرم‌های دیگر هم پوشش داده می‌شود", () => {
+  assert.equal(resolveMiniAppUrl({ PUBLIC_URL: "https://app.example.com" }).url, "https://app.example.com/app");
+  assert.equal(resolveMiniAppUrl({}).url, "");
+  assert.equal(resolveMiniAppUrl({}).source, null);
+});
+
+test("diagnoseMiniApp: با دامنهٔ Railway و بدون MINI_APP_URL، دکمه ست‌شده تشخیص داده می‌شود", async () => {
+  delete process.env.MINI_APP_URL;
+  process.env.RAILWAY_PUBLIC_DOMAIN = "diyar-bot.up.railway.app";
+  const restore = stubTelegram(
+    {
+      me: { ok: true, result: { id: 9, username: "diyar_bot" } },
+      menuButton: {
+        ok: true,
+        result: { type: "web_app", text: "پیش‌هوش", web_app: { url: "https://diyar-bot.up.railway.app/app" } },
+      },
+    },
+    "6:DIAGNOSE-RAILWAY"
+  );
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = "6:DIAGNOSE-RAILWAY";
+  try {
+    const report = await diagnoseMiniApp();
+    assert.equal(report.ok, true, report.verdict);
+    assert.equal(report.config.url, "https://diyar-bot.up.railway.app/app");
+    assert.equal(report.config.source, "RAILWAY_PUBLIC_DOMAIN");
+  } finally {
+    restore();
+    process.env.TELEGRAM_BOT_TOKEN = token;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
   }
 });
