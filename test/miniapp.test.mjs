@@ -413,7 +413,7 @@ test("diagnoseMiniApp: اگر تلگرام دکمه را داشته باشد، �
   }
 });
 
-test("diagnoseMiniApp: وقتی دکمه ست نشده، مسیر دیپلوی و BotFather را پیشنهاد می‌دهد", async () => {
+test("diagnoseMiniApp: وقتی دکمه ست نشده، ساخت دستی در BotFather را راهنمایی می‌کند", async () => {
   process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
   setMiniAppRegistration({ attempted: false, ok: false, skipped: null, error: null });
   const restore = stubTelegram(
@@ -427,16 +427,17 @@ test("diagnoseMiniApp: وقتی دکمه ست نشده، مسیر دیپلوی �
     const report = await diagnoseMiniApp();
     assert.equal(report.ok, false);
     assert.match(report.verdict, /ست نشده/);
-    assert.ok(report.hints.some((h) => /ری‌استارت|دیپلوی/.test(h)));
+    // سرویس عمداً دکمه‌ای ست نمی‌کند؛ راهنما مسیر دستی BotFather و دستور /app است
     assert.ok(report.hints.some((h) => /BotFather/.test(h)));
+    assert.ok(report.hints.some((h) => /\/app/.test(h)));
   } finally {
     restore();
   }
 });
 
-test("diagnoseMiniApp: خطای تلگرام هنگام ثبت دکمه گزارش می‌شود", async () => {
+test("diagnoseMiniApp: دکمهٔ غیر web_app یعنی مینی‌اپ وصل نیست", async () => {
   process.env.MINI_APP_URL = "https://diyar.up.railway.app/app";
-  setMiniAppRegistration({ attempted: true, ok: false, error: "400 Bad Request: wrong url" });
+  setMiniAppRegistration({ attempted: false, ok: false, skipped: "دکمهٔ منوی مینی‌اپ دستی در BotFather مدیریت می‌شود" });
   const restore = stubTelegram(
     {
       me: { ok: true, result: { id: 1, username: "diyar_bot" } },
@@ -447,7 +448,9 @@ test("diagnoseMiniApp: خطای تلگرام هنگام ثبت دکمه گزار
   try {
     const report = await diagnoseMiniApp();
     assert.equal(report.ok, false);
-    assert.ok(report.hints.some((h) => /400 Bad Request/.test(h)));
+    assert.match(report.verdict, /ست نشده/);
+    assert.match(report.registration.skipped, /BotFather/);
+    assert.ok(report.hints.some((h) => /Web App/.test(h)));
   } finally {
     restore();
   }
