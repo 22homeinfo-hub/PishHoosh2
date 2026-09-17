@@ -137,15 +137,19 @@ export function resolveMiniAppUrl(env = process.env) {
       .trim()
       .replace(/\/+$/, "");
 
+  // آدرس بدون طرح («your-app.up.railway.app/app») را تلگرام در دکمهٔ web_app رد
+  // می‌کند و کل پیام با 400 می‌افتد؛ پس طرح جاافتاده را خودمان کامل می‌کنیم.
+  const withHttps = (value) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`);
+
   const explicit = clean(env.MINI_APP_URL);
-  if (explicit) return { url: explicit, source: "MINI_APP_URL" };
+  if (explicit) return { url: withHttps(explicit), source: "MINI_APP_URL" };
 
   const railwayDomain = clean(env.RAILWAY_PUBLIC_DOMAIN).replace(/^https?:\/\//i, "");
   if (railwayDomain) return { url: `https://${railwayDomain}/app`, source: "RAILWAY_PUBLIC_DOMAIN" };
 
   // برخی پلتفرم‌ها (یا ریورس‌پراکسی دستی) دامنهٔ عمومی را در این متغیرها می‌دهند
   const publicUrl = clean(env.PUBLIC_URL || env.APP_URL || env.RENDER_EXTERNAL_URL);
-  if (publicUrl) return { url: `${publicUrl.replace(/^https?:\/\//i, "https://")}/app`, source: "PUBLIC_URL" };
+  if (publicUrl) return { url: `${withHttps(publicUrl).replace(/^http:\/\//i, "https://")}/app`, source: "PUBLIC_URL" };
 
   return { url: "", source: null };
 }

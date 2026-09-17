@@ -37,8 +37,10 @@ const MINI_APP_TITLE = (process.env.MINI_APP_TITLE?.trim() || "پیش‌هوش")
 const MINI_APP_MENU_BUTTON = String(process.env.MINI_APP_MENU_BUTTON ?? "true").toLowerCase() !== "false";
 
 // دکمهٔ inline که مینی‌اپ را داخل خود تلگرام باز می‌کند
+// فقط وقتی آدرس HTTPS باشد؛ وگرنه تلگرام کل پیام را با 400 رد می‌کند و کاربر
+// به‌جای جواب بات، یک خطای «پردازش پیام» می‌بیند.
 function miniAppMarkup() {
-  if (!MINI_APP_URL) return undefined;
+  if (!MINI_APP_URL || !/^https:\/\//i.test(MINI_APP_URL)) return undefined;
   return { inline_keyboard: [[{ text: `📱 تخمین قیمت در مینی‌اپ`, web_app: { url: MINI_APP_URL } }]] };
 }
 

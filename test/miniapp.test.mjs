@@ -515,6 +515,17 @@ test("resolveMiniAppUrl: مقدار دستی MINI_APP_URL اولویت دارد"
   assert.equal(resolveMiniAppUrl({ MINI_APP_URL: "  https://x.ir/app/  " }).url, "https://x.ir/app");
 });
 
+test("resolveMiniAppUrl: آدرس بدون https خودش کامل می‌شود", () => {
+  // تلگرام آدرس بدون طرح را در دکمهٔ web_app رد می‌کند و کل پیام با 400 می‌افتد
+  assert.equal(
+    resolveMiniAppUrl({ MINI_APP_URL: "pishhoosh-production.up.railway.app/app" }).url,
+    "https://pishhoosh-production.up.railway.app/app"
+  );
+  // طرح‌های موجود دست‌نخورده می‌مانند (http هم همان http می‌ماند تا diagnose بگیردش)
+  assert.equal(resolveMiniAppUrl({ MINI_APP_URL: "http://x.ir/app" }).url, "http://x.ir/app");
+  assert.equal(resolveMiniAppUrl({ PUBLIC_URL: "app.example.com" }).url, "https://app.example.com/app");
+});
+
 test("resolveMiniAppUrl: روی Railway بدون هیچ تنظیمی آدرس ساخته می‌شود", () => {
   assert.deepEqual(resolveMiniAppUrl({ RAILWAY_PUBLIC_DOMAIN: "diyar-bot-production.up.railway.app" }), {
     url: "https://diyar-bot-production.up.railway.app/app",
