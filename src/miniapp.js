@@ -117,7 +117,9 @@ export function initDataRejectionMessage(reason) {
 // بدون اینکه لازم باشد کسی لاگ‌ها را بگردد.
 // ────────────────────────────────────────────────────────
 
-// نتیجهٔ آخرین تلاش بات برای ثبت دکمهٔ منو (توسط telegram.js پر می‌شود)
+// وضعیت ورودی مینی‌اپ در تلگرام. سرویس خودش دکمهٔ منو را ست نمی‌کند (دستی در
+// BotFather مدیریت می‌شود)؛ telegram.js فقط همین رکورد را پر می‌کند تا گزارش
+// تشخیصی بتواند بگوید ورودی مینی‌اپ چگونه مدیریت می‌شود.
 const registration = { attempted: false, ok: false, skipped: null, error: null, botUsername: null, at: null };
 
 /**

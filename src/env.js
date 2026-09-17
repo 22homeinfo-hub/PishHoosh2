@@ -8,15 +8,3 @@
 import dotenv from "dotenv";
 
 dotenv.config();
-
-// خواندن متغیر محیطی با مقدار پیش‌فرض (فاصله‌های اضافی هم پاک می‌شود)
-export function env(name, fallback = undefined) {
-  const value = process.env[name];
-  if (value === undefined || value === "") return fallback;
-  return typeof value === "string" ? value.trim() : value;
-}
-
-export function envNumber(name, fallback) {
-  const value = Number(env(name, fallback));
-  return Number.isFinite(value) ? value : fallback;
-}

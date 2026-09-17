@@ -1,286 +1,291 @@
-# پیش‌هوش — ربات دفتر املاک دیار
+# PishHoosh — Diar Real Estate Office Bot
 
-ربات هوشمند دریافت اطلاعات فایل ملکی و تخمین قیمت، برای **تلگرام**، **مینی‌اپ تلگرام** و **لندینگ‌پیج**.
+An AI assistant that collects property file details and produces price estimates, for
+**Telegram**, a **Telegram Mini App**, and a **landing page**.
 
-کاربر اسم یا شمارهٔ پروژه را می‌فرستد، ربات فیلدهای لازم را یکی‌یکی می‌پرسد، قیمت تخمینی را
-طبق فرمول ثبت‌شده در گوگل‌شیت محاسبه می‌کند و در پایان نام و شمارهٔ تماس را گرفته، لید را در شیت ثبت می‌کند.
+The user sends a project name or list number; the bot asks for the required fields, computes
+the estimate from the pricing rules stored in Google Sheets, then takes the customer's name
+and phone number and saves the lead in the sheet.
 
-در **مینی‌اپ** همین کار خلوت‌تر است: لیست پروژه‌ها را می‌بینید، روی یک پروژه می‌زنید و
-وارد چتِ تخمین قیمت همان پروژه می‌شوید؛ یا در تب «چت» مستقیماً با ربات حرف می‌زنید.
+In the **mini app** the same flow is calmer: you see the list of active projects, tap one and
+land directly in that project's estimate chat — or talk to the same bot in the "Chat" tab.
 
 ---
 
-## ساختار پروژه
+## Project layout
 
 ```
 src/
-  index.js          نقطهٔ شروع - بات تلگرام و سرور وب را با هم بالا می‌آورد
-  env.js            بارگذاری .env (قبل از همهٔ ماژول‌ها)
-  telegram.js       اتصال به تلگرام (کامند، کیبورد، دکمهٔ منوی مینی‌اپ، شکستن پیام بلند)
-  webApi.js         API وب (لندینگ‌پیج + مینی‌اپ) + صفحهٔ دمو + محدودسازی نرخ
-  miniapp.js        راستی‌آزمایی initData تلگرام و ساخت هویت کاربر مینی‌اپ
-  conversation.js   منطق مشترک مکالمه (بین تلگرام، مینی‌اپ و وب مشترک است)
-  ai.js             اتصال به Gemini با SDK رسمی @google/genai
-  projects.js       تطبیق ورودی کاربر با پروژه (شمارهٔ لیست / اسم / نگارش فارسی)
-  sheets.js         اتصال به گوگل‌شیت (خواندن پروژه‌ها، ثبت و اصلاح لیدها)
-  sessions.js       نگهداری وضعیت مکالمهٔ هر کاربر در حافظه + قفل هر کاربر
-  text.js           یکسان‌سازی متن فارسی (ی/ي، ک/ك، نیم‌فاصله، ارقام، اعداد، شمارهٔ تماس)
-  notify.js         ارسال هشدار به مدیر (اختیاری)
-  doctor.js         ابزار تشخیص: npm run doctor
+  index.js          entry point - starts the Telegram bot and the web server together
+  env.js            loads .env (before every other module)
+  telegram.js       Telegram connection (commands, keyboards, long-message chunking)
+  webApi.js         web API (landing page + mini app) + demo page + rate limiting
+  miniapp.js        Telegram initData verification and mini-app user identity
+  conversation.js   shared conversation logic (Telegram, mini app and web all use it)
+  ai.js             Gemini connection via the official @google/genai SDK
+  projects.js       matches user input to a project (list number / name / Persian spelling)
+  sheets.js         Google Sheets connection (read projects, save and update leads)
+  sessions.js       per-user conversation state in memory + per-user lock
+  text.js           Persian text normalization (ی/ي, ک/ك, half-space, digits, numbers, phones)
+  notify.js         optional admin alerts
+  doctor.js         diagnostics tool: npm run doctor
 public/
-  miniapp.html      مینی‌اپ تلگرام (دو تب: پروژه‌ها و چت) - مسیر /app
-  demo.html         ویجت چت نمونه برای تست API وب - مسیر /demo
+  miniapp.html      Telegram mini app (two tabs: projects and chat) - served at /app
+  demo.html         sample chat widget for testing the web API - served at /demo
 tools/
-  miniapp-preview.mjs  پیش‌نمایش مینی‌اپ بدون کلید Gemini و گوگل‌شیت: npm run miniapp:preview
-  preview-sheets.mjs   پروژه‌های نمونه برای همان پیش‌نمایش
-test/               تست‌ها: npm test
+  miniapp-preview.mjs  preview the mini app without a Gemini key or Google Sheet: npm run miniapp:preview
+  preview-sheets.mjs   sample projects used by that preview
+test/               tests: npm test
 ```
 
 ---
 
-## ۱) ساخت گوگل‌شیت
+## 1) Google Sheet setup
 
-یک اسپرِدشیت با دو تب بسازید. نام تب‌ها را می‌توانید با `PROJECTS_SHEET_TITLE` و
-`LEADS_SHEET_TITLE` تغییر دهید.
+Create a spreadsheet with two tabs. Tab names can be changed with `PROJECTS_SHEET_TITLE`
+and `LEADS_SHEET_TITLE`.
 
-**تب `Projects`** (ستون‌ها، ردیف اول = هدر):
+**`Projects` tab** (columns, first row = header):
 
-| نام پروژه | فیلدهای موردنیاز (با کاما جدا کنید) | قیمت پایه هر متر (تومان) | توضیحات کمکی برای AI | فعال؟ |
+| Project name | Required fields (comma separated) | Base price per meter (Toman) | Helper notes for the AI | Active? |
 |---|---|---|---|---|
-| پارسیان ۱ | متراژ، طبقه، سال ساخت، وضعیت سند | 120000000 | قیمت = متراژ × قیمت پایه؛ طبقهٔ بالای ۳ معادل ۵٪ اضافه | بله |
+| Parsian 1 | Area, floor, build year, deed status | 120000000 | price = area × base price; floors above 3 add 5% | yes |
 
-- **فیلدهای موردنیاز**: هم با کامای انگلیسی `,` و هم فارسی `،` جدا می‌شود.
-- **قیمت پایه**: با ارقام فارسی، جداکنندهٔ هزارگان و حتی «120 میلیون» هم درست خوانده می‌شود.
-- **فعال؟**: `بله / آره / فعال / yes / true / 1` یعنی فعال، `نه / خیر / غیرفعال / no / false / 0` یعنی غیرفعال.
-  اگر این ستون خالی باشد، پروژه **فعال** در نظر گرفته می‌شود (و در `npm run doctor` هشدار می‌گیرید).
-- **توضیحات کمکی برای AI**: هر فرمول یا قاعدهٔ قیمت‌گذاری که می‌خواهید دقیق رعایت شود.
+- **Required fields**: both English `,` and Persian `،` separators are accepted.
+- **Base price**: Persian digits, thousands separators and even "120 million" parse correctly.
+- **Active?**: `بله / آره / فعال / yes / true / 1` means active; `نه / خیر / غیرفعال / no / false / 0`
+  means inactive. If the column is empty the project is treated as **active** (and
+  `npm run doctor` warns about it).
+- **Helper notes for the AI**: any pricing formula or rule you want followed exactly.
 
-**تب `Leads`** (ربات فقط می‌نویسد):
+**`Leads` tab** (the bot only writes here):
 
-| تاریخ | نام مشتری | شماره تماس | نام پروژه | اطلاعات فایل | قیمت تخمینی (تومان) | منبع |
+| Date | Customer name | Phone | Project name | File info | Estimated price (Toman) | Source |
 |---|---|---|---|---|---|---|
 
-اگر ستون `تاریخ شمسی` هم اضافه کنید، تاریخ میلادی تهران در آن نوشته می‌شود.
+If you also add a `تاریخ شمسی` (Persian calendar) column, the Tehran Gregorian date is written there.
 
-> **مهم:** نگارش هدرها حساس نیست. فاصله، نیم‌فاصله، «ی/ي»، «ک/ك»، پرانتز و «؟» نادیده گرفته
-> می‌شوند؛ یعنی هم `فعال؟` کار می‌کند و هم `فعال` یا `وضعیت`. اما اگر ستونی پیدا نشود،
-> `npm run doctor` دقیقاً می‌گوید کدام ستون و با چه هدرهایی موجود است.
+> **Note:** header spelling is forgiving. Spaces, half-spaces, "ی/ي", "ک/ك", parentheses and "؟"
+> are ignored, so `فعال؟`, `فعال` and `وضعیت` all work. If a column cannot be found,
+> `npm run doctor` says exactly which column is missing and which headers exist.
 
 ---
 
-## ۲) گوگل سرویس‌اکانت
+## 2) Google service account
 
-1. در https://console.cloud.google.com/ یک پروژه بسازید (یا همان پروژهٔ Gemini را انتخاب کنید).
-2. **APIs & Services → Library** → «Google Sheets API» را Enable کنید.
+1. Create a project at https://console.cloud.google.com (or reuse the Gemini project).
+2. **APIs & Services → Library** → enable "Google Sheets API".
 3. **APIs & Services → Credentials → Create Credentials → Service Account**.
-4. در تب **Keys → Add Key → Create New Key → JSON** یک کلید دانلود کنید.
-5. از فایل JSON:
+4. In the **Keys** tab: **Add Key → Create New Key → JSON** and download it.
+5. From the JSON file:
    - `client_email` → `GOOGLE_SERVICE_ACCOUNT_EMAIL`
-   - `private_key` → `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (چندخطی؛ با `\n` و داخل کوتیشن)
-6. در گوگل‌شیت روی **Share** همان `client_email` را با دسترسی **Editor** اضافه کنید.
-   بدون این مرحله، ربات نه می‌خواند و نه می‌نویسد.
+   - `private_key` → `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (multi-line; keep the `\n`s, inside quotes)
+6. In the Google Sheet, **Share** with that same `client_email` as **Editor**.
+   Without this step the bot can neither read nor write.
 
 ---
 
-## ۳) فایل `.env`
+## 3) The `.env` file
 
 ```bash
 cp .env.example .env
 ```
 
-مقادیر لازم:
+Required values:
 
-| متغیر | توضیح |
+| Variable | Description |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | از BotFather |
-| `GEMINI_API_KEY` | از https://aistudio.google.com/apikey |
-| `GEMINI_MODEL` | پیش‌فرض `gemini-3.6-flash`؛ گزینهٔ ارزان‌تر `gemini-2.5-flash` |
-| `GEMINI_THINKING_LEVEL` | `minimal`/`low`/`medium`/`high` — برای این کار `low` کافی و سریع‌تر است |
-| `GOOGLE_SHEET_ID` | بخش بین `/d/` و `/edit` در لینک شیت |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | از فایل JSON |
-| `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | از فایل JSON (با `\n`) |
-| `ADMIN_CHAT_ID` | شناسهٔ چت مدیر؛ هشدار خرابی‌ها (مثل ثبت‌نشدن لید) به آنجا می‌رود |
-| `CORS_ORIGIN` | دامنهٔ سایت، با کاما جدا کنید. خالی = باز برای همه (فقط برای تست) |
-| `MINI_APP_URL` | آدرس عمومی و HTTPS مینی‌اپ (`https://دامنهٔ-شما/app`)؛ برای فعال‌شدن دکمهٔ ورود به مینی‌اپ در تلگرام. اگر `https://` را جا بیندازید خود سرویس کاملش می‌کند |
+| `TELEGRAM_BOT_TOKEN` | from BotFather |
+| `GEMINI_API_KEY` | from https://aistudio.google.com/apikey |
+| `GEMINI_MODEL` | default `gemini-3.6-flash`; cheaper option `gemini-2.5-flash` |
+| `GEMINI_THINKING_LEVEL` | `minimal`/`low`/`medium`/`high` — `low` is enough and faster here |
+| `GOOGLE_SHEET_ID` | the part between `/d/` and `/edit` in the sheet URL |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | from the JSON file |
+| `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | from the JSON file (with `\n`) |
+| `ADMIN_CHAT_ID` | admin chat id; failure alerts (e.g. a lead that could not be saved) go there |
+| `CORS_ORIGIN` | your site domain(s), comma separated. Empty = open to everyone (testing only) |
+| `MINI_APP_URL` | public HTTPS URL of the mini app (`https://your-domain/app`). Only used for `/app` links and diagnostics; a missing `https://` is added automatically |
 
-بقیهٔ متغیرها (پورت، سقف نرخ، عمر نشست‌ها، نام تب‌ها) در `.env.example` توضیح داده شده‌اند.
+The remaining variables (port, rate limits, session TTL, tab names) are documented in `.env.example`.
 
 ---
 
-## ۴) نصب، بررسی سلامت و اجرا
+## 4) Install, health check, run
 
 ```bash
 npm install
-npm run doctor     # همه‌چیز را چک می‌کند و دقیقاً می‌گوید مشکل کجاست
+npm run doctor     # checks everything and says exactly what is wrong
 npm start
 ```
 
-`npm run doctor` این‌ها را بررسی می‌کند: متغیرهای محیطی، معتبر بودن نام مدل و کلید Gemini،
-اتصال به گوگل‌شیت، نگاشت هدر ستون‌ها، پروژه‌های فعال (و اینکه فیلد یا قیمت پایهٔ هرکدام
-خوانده نشده باشد) و آماده‌بودن تب Leads. اگر مشکلی باشد با کد خروج ۱ تمام می‌شود.
+`npm run doctor` verifies: environment variables, model name and Gemini key validity, the Google
+Sheets connection, column header mapping, active projects (including whether any field list or
+base price failed to parse) and that the Leads tab is ready. It exits with code 1 on problems.
 
-خروجی سالم:
+Healthy output:
 
 ```
-✅ بات تلگرام فعال شد: @diyar_bot
-✅ سرور وب روی 0.0.0.0:3000 فعال شد
-   مدل هوش مصنوعی: gemini-3.6-flash | سطح تفکر: low
-   صفحهٔ تست چت: http://localhost:3000/demo
-✅ 2 پروژهٔ فعال از گوگل‌شیت خوانده شد: پارسیان ۱، ساختمان نگین
+✅ Telegram bot active: @diyar_bot
+✅ Web server listening on 0.0.0.0:3000
+   AI model: gemini-3.6-flash | thinking level: low
+   Chat test page: http://localhost:3000/demo
+✅ 2 active projects read from Google Sheets: Parsian 1, Negin Building
 ```
 
-برای توسعه با ری‌استارت خودکار: `npm run dev`
-برای اجرای تست‌ها: `npm test`
+For development with auto-restart: `npm run dev`
+To run the tests: `npm test`
 
 ---
 
-## ۵) دیپلوی و اتصال به بات تلگرام
+## 5) Deploy and connect the Telegram bot
 
-فایل `railway.json` داخل ریپو همهٔ تنظیمات حساس را خودش اعمال می‌کند:
-**یک instance** (دو نمونهٔ همزمان = خطای 409 و جواب تکراری)، **بدون هم‌پوشانی دیپلوی**
-(`overlapSeconds: 0` تا هنگام دیپلوی جدید، نمونهٔ قدیمی همچنان polling نکند)،
-**healthcheck روی `/health`** و **خاموش‌نشدن در زمان بی‌کاری**.
+The `railway.json` file in the repo applies the sensitive settings itself:
+**one instance** (two simultaneous instances = 409 errors and duplicate replies),
+**no deploy overlap** (`overlapSeconds: 0`, so the old instance stops polling before the new one
+starts), **healthcheck on `/health`** and **no sleeping when idle**.
 
-مراحل:
+Steps:
 
-1. ریپو را در https://railway.app با **New Project → Deploy from GitHub repo** وارد کنید.
-   در **Settings → Source** برنچی را انتخاب کنید که کد نهایی آنجاست (در حال حاضر
-   `arena/01a0ac59-pishhoosh`). اگر سرویس را از قبل ساخته‌اید، فقط برنچ را عوض کنید تا
-   دیپلوی جدید انجام شود.
-2. **Public Networking** را فعال کنید تا دامنهٔ عمومی `https://<name>.up.railway.app` بگیرید؛
-   مینی‌اپ بدون HTTPS عمومی در تلگرام باز نمی‌شود.
-3. در تب **Variables** این‌ها را وارد کنید (Railway فایل `.env` را نمی‌خواند):
+1. Import the repo at https://railway.app with **New Project → Deploy from GitHub repo**.
+   In **Settings → Source** pick the branch that holds the final code (currently
+   `arena/01a0ac59-pishhoosh`). If the service already exists, just change the branch to trigger
+   a new deploy.
+2. Enable **Public Networking** to get a public domain `https://<name>.up.railway.app`;
+   the mini app will not open in Telegram without public HTTPS.
+3. In the **Variables** tab enter (Railway does not read the `.env` file):
    `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_SHEET_ID`,
    `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`,
-   `ADMIN_CHAT_ID`, `CORS_ORIGIN` و **`MINI_APP_URL`** (مثلاً
+   `ADMIN_CHAT_ID`, `CORS_ORIGIN` and optionally **`MINI_APP_URL`** (e.g.
    `https://<name>.up.railway.app/app`).
-   در کلید خصوصی حتماً `\n`ها را نگه دارید.
-4. دیپلوی کنید و در لاگ‌ها این خط‌ها را ببینید:
+   Keep the `\n`s inside the private key.
+4. Deploy and look for these log lines:
    ```
-   ✅ بات تلگرام فعال شد: @your_bot
-      📱 مینی‌اپ: https://<name>.up.railway.app/app (منبع آدرس: RAILWAY_PUBLIC_DOMAIN)
-   ✅ سرور وب روی 0.0.0.0:3000 فعال شد
-   ✅ 2 پروژهٔ فعال از گوگل‌شیت خوانده شد
+   ✅ Telegram bot active: @your_bot
+      📱 Mini app: https://<name>.up.railway.app/app (url source: RAILWAY_PUBLIC_DOMAIN)
+   ✅ Web server listening on 0.0.0.0:3000
+   ✅ 2 active projects read from Google Sheets
    ```
-5. در مرورگر `https://<name>.up.railway.app/app` را باز کنید (بیرون از تلگرام هم کار می‌کند)،
-   سپس یک‌بار در BotFather دکمهٔ منو را روی همین آدرس ست کنید (بخش «ورودی مینی‌اپ در
-   تلگرام») و در تلگرام `/start` بزنید؛ مینی‌اپ از **دکمهٔ منو** (کنار کادر نوشتن) باز می‌شود.
+5. Open `https://<name>.up.railway.app/app` in a browser (it works outside Telegram too), then set
+   the menu button once in BotFather (see "Mini app entry in Telegram" below) and send `/start` in
+   Telegram; the mini app opens from the **menu button** next to the input box.
 
-**اگر قبلاً برای این بات webhook ست کرده بودید**، polling کار نمی‌کند و در لاگ خطای 409 می‌بینید.
-یک‌بار این را صدا بزنید (در مرورگر هم باز می‌شود):
+**If a webhook was previously set for this bot**, polling will not work and you will see 409
+errors in the log. Call this once (it also opens in a browser):
 
 ```
 https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/deleteWebhook
 ```
 
-`npm run doctor` هم همین را چک می‌کند: معتبر بودن توکن با `getMe`، نام بات، و فعال‌بودن webhook.
+`npm run doctor` checks the same things: token validity via `getMe`, the bot username, and
+whether a webhook is active.
 
-### اجرای محلی (ساده‌ترین راه برای تست)
+### Local run (easiest way to test)
 
 ```bash
 git clone https://github.com/GameOver2032/PishHoosh.git
 cd PishHoosh
 npm install
-cp .env.example .env      # سپس مقادیر واقعی را بگذارید
-npm run doctor            # باید «🎉 همه‌چیز سالم است» بدهد
+cp .env.example .env      # then fill in real values
+npm run doctor            # should say everything is healthy
 npm start
 ```
 
-> ⚠️ بات را هم‌زمان روی لپ‌تاپ و Railway اجرا نکنید؛ فقط یک نمونه می‌تواند polling کند.
+> ⚠️ Do not run the bot on your laptop and on Railway at the same time; only one instance can poll.
 
 ---
 
-## ۶) مینی‌اپ تلگرام
+## 6) Telegram Mini App
 
-یک مینی‌اپ خلوت و مینیمال با دو بخش که روی **همین سرویس** (مسیر `/app`) ارائه می‌شود و
-به هیچ سرویس دیگری نیاز ندارد:
+A sparse, minimal mini app with two sections, served by **this same service** at `/app` and
+requiring no other service:
 
-| بخش | کار |
+| Section | What it does |
 |---|---|
-| **پروژه‌ها** | لیست پروژه‌های فعال از گوگل‌شیت + فیلدهای لازم هرکدام، با یک **کادر جست‌وجو** بالای لیست. با یک کلیک روی پروژه، چتِ تخمین قیمتِ همان پروژه باز می‌شود و ربات اطلاعات فایل را می‌پرسد و قیمت تخمینی را اعلام می‌کند. |
-| **چت** | همان ربات، بدون واسطه؛ می‌توانید مستقیم سوال بپرسید یا اسم پروژه را بنویسید. |
+| **Projects** | The active projects from Google Sheets with each one's required fields, plus a **search box** above the list. Tapping a project opens that project's estimate chat: the bot asks for the file details and announces the estimate. |
+| **Chat** | The same bot, directly; ask anything or type a project name. |
 
-جست‌وجو روی **نام پروژه و فیلدهایش** کار می‌کند و چند کلمه را با هم (AND) می‌سنجد.
-پیش از مقایسه، هر دو طرف یکسان‌سازی می‌شوند؛ پس این‌ها فرقی ندارند: «ي» و «ک» عربی با
-«ی» و «ک» فارسی، رقم لاتین با فارسی، نیم‌فاصله با فاصله (`شهرک زیتون` ≡ `شهرک‌زیتون`) و
-حرکت‌گذاری و کشیده (`پارسـيان` ≡ `پارسیان`). اگر چیزی پیدا نشود، خودِ عبارت در پیام
-«پیدا نشد» نمایش داده می‌شود تا اشتباه تایپی معلوم باشد.
+Search matches the **project name and its fields** and requires every word to hit (AND).
+Both sides are normalized before comparison, so these make no difference: Arabic "ي"/"ک" vs
+Persian "ی"/"ک", Latin vs Persian digits, half-space vs space, and diacritics/tatweel
+(`پارسـيان` ≡ `پارسیان`). When nothing is found, the query itself is shown in the "not found"
+message so typos are obvious.
 
-اولین بار که کاربر روی پروژه بزند، یک برگهٔ کوچک برای **نام و شمارهٔ تماس** باز می‌شود
-(نام از پروفایل تلگرام پیش‌پر می‌شود) تا لیدِ ثبت‌شده در شیت، شمارهٔ پیگیری داشته باشد.
-کاربر می‌تواند «فعلاً بدون شماره ادامه می‌دهم» را بزند. اگر کاربر قبلاً در چت بات شماره‌اش را
-به اشتراک گذاشته باشد، مینی‌اپ همان را برمی‌دارد و دوباره نمی‌پرسد.
+The first time a user taps a project, a small sheet asks for **name and phone number** (the name
+is pre-filled from the Telegram profile) so the lead saved in the sheet has a follow-up number.
+The user can tap "continue without a number for now". If the user already shared their phone in
+the bot chat, the mini app reuses it and does not ask again.
 
-چند حرکتِ کوتاه و بی‌صدا هم به این بخش‌ها جان می‌دهد — همه زیر یک ثانیه و هم‌راستا با کار
-دفتر املاک: کارت‌ها مثل **طبقه‌های یک ساختمان** یکی‌یکی بالا می‌آیند و هنگام بارگذاری یک
-**جرثقیل** تاب می‌خورد؛ نشانگر تب می‌لغزد و در برگهٔ شمارهٔ تماس، **امضا پای قرارداد**
-نوشته و بعد **تیکِ ثبت** کشیده می‌شود؛ و وقتی ربات قیمت را اعلام می‌کند، عدد داخل یک
-**برچسب قیمت** با سکهٔ چرخان و شمارش رقم‌ها ظاهر می‌شود. اگر کاربر «کاهش حرکت»
-(`prefers-reduced-motion`) را در سیستم‌عاملش روشن کرده باشد، همهٔ اینها خاموش می‌شوند.
+A few short, silent motions bring these sections to life — all under one second and aligned with
+the work of a real-estate office: cards rise one by one like **floors of a building** and a
+**crane** sways while loading; the tab indicator slides; in the contact sheet a **signature is
+written on a contract** and then a **saved checkmark** is drawn; and when the bot announces a
+price, the number appears inside a **price chip** with a spinning coin and counting digits. If the
+user has enabled "reduce motion" (`prefers-reduced-motion`) in their OS, all of this turns off.
 
-### اتصال به تلگرام
+### Telegram connection
 
-**روی Railway هیچ کاری لازم نیست بکنید.** بات آدرس مینی‌اپ را خودش از متغیر آمادهٔ
-`RAILWAY_PUBLIC_DOMAIN` می‌سازد (`https://<دامنه>/app`) و دکمهٔ منو را ست می‌کند. تنها شرط این است که
-**Public Networking** سرویس روشن باشد (Settings → Networking → Generate Domain).
+**On Railway you do not need to configure anything for the URL.** The service builds the mini app
+address itself from the built-in `RAILWAY_PUBLIC_DOMAIN` variable (`https://<domain>/app`). The only
+requirement is that the service's **Public Networking** is on (Settings → Networking → Generate
+Domain).
 
-اگر دامنهٔ اختصاصی دارید یا جای دیگری دیپلوی می‌کنید، آدرس را دستی بگذارید:
+If you have your own domain or deploy elsewhere, set the address manually:
 
 ```
 MINI_APP_URL=https://amlak.diyar.ir/app
 ```
 
-بعد از بالا آمدن سرویس، بات در لاگ می‌نویسد:
+After boot the bot logs:
 
 ```
-✅ بات تلگرام فعال شد: @your_bot
-   📱 مینی‌اپ: https://your-app.up.railway.app/app (منبع آدرس: RAILWAY_PUBLIC_DOMAIN)
+✅ Telegram bot active: @your_bot
+   📱 Mini app: https://your-app.up.railway.app/app (url source: RAILWAY_PUBLIC_DOMAIN)
 ```
 
-### ورودی مینی‌اپ در تلگرام: دستی در BotFather
+### Mini app entry in Telegram: manual in BotFather
 
-سرویس **هیچ‌وقت** دکمهٔ منو را ست یا بازنویسی نمی‌کند و زیر پیام‌ها هم دکمهٔ ورود به
-مینی‌اپ نمی‌گذارد؛ ورودی مینی‌اپ را خودتان یک‌بار در BotFather می‌سازید و همان معتبر است:
+The service **never** sets or overwrites the menu button and never puts an "open mini app" button
+under messages; you create the entry once in BotFather and that is the source of truth:
 
-`/mybots` → بات شما → **Bot Settings → Menu Button → Configure Menu Button** →
-نوع **Web App** و آدرس `https://دامنهٔ-شما/app`.
+`/mybots` → your bot → **Bot Settings → Menu Button → Configure Menu Button** →
+type **Web App** and URL `https://your-domain/app`.
 
-| راه | کجا دیده می‌شود |
+| Way | Where it appears |
 |---|---|
-| **دکمهٔ منو (BotFather)** | آیکون کنار کادر نوشتن در چت خصوصی با بات |
-| **دستور `/app`** | آدرس مینی‌اپ را به‌صورت متن ساده در چت می‌فرستد (برای پشتیبانی/تشخیص) |
+| **Menu button (BotFather)** | The icon next to the input box in a private chat with the bot |
+| **`/app` command** | Sends the mini app URL as plain text in the chat (for support/diagnostics) |
 
-اگر دکمهٔ منو را نمی‌بینید: یک‌بار تلگرام را کامل ببندید و باز کنید (کلاینت آن را کش می‌کند)
-و مطمئن شوید در **چت خصوصی** با بات هستید (در گروه دکمهٔ منو وجود ندارد). وضعیت واقعی دکمه
-را هم می‌توانید در `/api/miniapp-status` ببینید (پایین‌تر).
+If you do not see the menu button: fully close and reopen Telegram (clients cache it) and make
+sure you are in a **private chat** with the bot (there is no menu button in groups). The live
+state of the button is also visible in `/api/miniapp-status` (below).
 
-### تشخیص خودکار: `GET /api/miniapp-status`
+### Self-diagnosis: `GET /api/miniapp-status`
 
-به‌جای گشتن در لاگ‌ها، این آدرس را در مرورگر باز کنید:
+Instead of digging through logs, open this in a browser:
 
 ```
-https://<دامنهٔ-شما>/api/miniapp-status
+https://your-domain/api/miniapp-status
 ```
 
-خروجی یک گزارش فارسی است با `verdict` (علت اصلی)، `hints` (قدم‌های بعدی) و وضعیت واقعی تلگرام
-(خروجی زندهٔ `getMe` و `getChatMenuButton`). این endpoint این حالت‌ها را از هم تشخیص می‌دهد:
+The output is a Persian report with `verdict` (root cause), `hints` (next steps) and the live
+Telegram state (fresh `getMe` and `getChatMenuButton` results). It distinguishes these cases:
 
-| `verdict` | یعنی |
+| `verdict` | Meaning |
 |---|---|
-| `آدرس مینی‌اپ ساخته نشد…` | نه `MINI_APP_URL` ست شده و نه دامنهٔ عمومی سرویس پیدا شد (Public Networking خاموش است) |
-| `آدرس «…» با https شروع نمی‌شود…` | تلگرام فقط HTTPS عمومی را قبول می‌کند |
-| `سرور به api.telegram.org نرسید…` | مشکل شبکهٔ سرویس است، نه توکن |
-| `تلگرام بات را نپذیرفت: Unauthorized` | `TELEGRAM_BOT_TOKEN` غلط یا باطل شده |
-| `سمت تلگرام درست است: دکمهٔ منوی بات روی مینی‌اپ تنظیم شده` | دکمهٔ BotFather سالم است؛ اگر در کلاینت نمی‌بینیدش، کش تلگرام است |
-| `دکمهٔ منو در تلگرام ست نشده است…` | سرویس عمداً دکمه‌ای ست نمی‌کند؛ آن را در BotFather بسازید (قدم‌ها در `hints` آمده) |
-| `دکمهٔ منو روی آدرس دیگری ست شده است…` | دکمهٔ BotFather با آدرس جاری سرویس یکی نیست؛ یا دکمه یا `MINI_APP_URL` را هماهنگ کنید |
+| `Mini app URL could not be built…` | Neither `MINI_APP_URL` is set nor a public service domain was found (Public Networking off) |
+| `URL "…" does not start with https…` | Telegram only accepts public HTTPS |
+| `Server could not reach api.telegram.org…` | A service network problem, not the token |
+| `Telegram rejected the bot: Unauthorized` | `TELEGRAM_BOT_TOKEN` is wrong or revoked |
+| `Telegram side is fine: the menu button is set to the mini app` | The BotFather button is healthy; if a client does not show it, it is Telegram's cache |
+| `Menu button is not set in Telegram…` | The service intentionally sets nothing; create it in BotFather (steps are in `hints`) |
+| `Menu button is set to a different address…` | The BotFather button does not match the current service URL; align either the button or `MINI_APP_URL` |
 
-> پاسخ این endpoint توکن بات را لو نمی‌دهد و خروجی تلگرام ۳۰ ثانیه کش می‌شود.
+> The response never leaks the bot token, and the Telegram output is cached for 30 seconds.
 
-### کدام نسخه دیپلوی شده؟ `build` در همان گزارش
+### Which version is deployed? `build` in the same report
 
-اگر تغییری در مینی‌اپ نمی‌بینید، اول از همه ببینید سرور **واقعاً** کدام نسخه را سرو می‌کند.
-همان `/api/miniapp-status` یک بخش `build` دارد:
+If you do not see a change in the mini app, first check which version the server **actually**
+serves. The same `/api/miniapp-status` has a `build` section:
 
 ```json
 {
@@ -295,162 +300,184 @@ https://<دامنهٔ-شما>/api/miniapp-status
 }
 ```
 
-- `version` از `package.json` و `miniapp` اثر انگشتِ کوتاهِ همان `public/miniapp.html` است که
-  سرور الان سرو می‌کند (خودش از روی فایل ساخته می‌شود، پس قدیمی نمی‌ماند).
-- `branch`/`commit`/`deployment` از متغیرهای آمادهٔ Railway می‌آیند؛ با اینها معلوم می‌شود
-  سرویس روی **کدام شاخه** دیپلوی شده. اگر شاخهٔ کاری شما نیست، تغییرات هیچ‌وقت نمی‌رسند.
-- اگر اینها درست بود و باز هم تغییر را نمی‌دیدید، مسئله کشِ کلاینت تلگرام است: مینی‌اپ را
-  کامل ببندید (از لیست برنامه‌های اخیر هم پاکش کنید) و دوباره باز کنید.
+- `version` comes from `package.json` and `miniapp` is a short fingerprint of the very
+  `public/miniapp.html` the server is serving right now (computed from the file, so it never goes
+  stale).
+- `branch`/`commit`/`deployment` come from Railway's built-in variables; they show **which branch**
+  the service deployed. If it is not your working branch, changes never arrive.
+- If those are correct and you still see no change, it is the Telegram client cache: fully close
+  the mini app (remove it from recents) and open it again.
 
-> متغیرهای قدیمی `MINI_APP_TITLE` و `MINI_APP_MENU_BUTTON` دیگر استفاده نمی‌شوند؛ اگر در
-> Variables سرویس هستند، حذفشان کنید بی‌ضرر است ولی لازم هم نیست.
+> The legacy variables `MINI_APP_TITLE` and `MINI_APP_MENU_BUTTON` are no longer used; if they are
+> still in your service Variables, removing them is harmless but not required.
 
-> ⚠️ تلگرام فقط **HTTPS عمومی** را قبول می‌کند؛ `http://localhost:3000/app` در تلگرام باز نمی‌شود.
+> ⚠️ Telegram only accepts **public HTTPS**; `http://localhost:3000/app` will not open in Telegram.
 
-### تست مینی‌اپ بدون کلید Gemini و گوگل‌شیت
+### Preview the mini app without a Gemini key or Google Sheet
 
 ```bash
-npm run miniapp:preview     # سپس http://localhost:4100/app
+npm run miniapp:preview     # then http://localhost:4100/app
 ```
 
-این ابزار **همان کد سمت سرور و همان صفحهٔ مینی‌اپ** را بالا می‌آورد، فقط گوگل‌شیت را با چند
-پروژهٔ نمونه و Gemini را با یک شبیه‌سازِ سادهٔ قیمت‌گذاری جایگزین می‌کند تا بتوانید رابط را
-کلیک کنید و جریان کامل «انتخاب پروژه → اطلاعات فایل → اعلام تخمین → ثبت لید» را ببینید.
-لیدها به‌جای شیت، در کنسول چاپ می‌شوند.
+This tool runs **the same server code and the same mini app page**, replacing only Google Sheets
+with a few sample projects and Gemini with a simple pricing simulator, so you can click through
+the whole flow "pick a project → file details → estimate → lead saved". Leads are printed to the
+console instead of the sheet.
 
-### نکات پیاده‌سازی
+### Implementation notes
 
-- **احراز هویت:** صفحه `WebApp.initData` را برای سرور می‌فرستد و `src/miniapp.js` امضای
-  تلگرام را با `HMAC-SHA256` راستی‌آزمایی می‌کند (کلید: `WebAppData` + توکن بات). رشتهٔ
-  دست‌کاری‌شده یا کهنه (پیش‌فرض: بیش از ۲۴ ساعت) با `403` رد می‌شود.
-- **نشست پایدار:** کلید نشست مینی‌اپ `miniapp:<شناسهٔ کاربر تلگرام>` است، پس با بستن و باز
-  کردن مجدد مینی‌اپ، پروژهٔ نیمه‌تمام و اطلاعات تماس از بین نمی‌رود و کاربر ادامهٔ همان
-  مکالمه را می‌بیند.
-- **مرورگر معمولی:** بیرون از تلگرام، به‌جای initData از یک `sessionId` در `localStorage`
-  استفاده می‌شود؛ یعنی همان صفحه برای تست در مرورگر هم کار می‌کند.
-- **حریم داده:** لیست پروژه‌ها فقط `name` و `fields` را به کلاینت می‌دهد؛ قیمت پایهٔ هر متر و
-  فرمول قیمت‌گذاری (ستون توضیحات شیت) هیچ‌وقت به مرورگر کاربر نمی‌رود.
-- **تم:** رنگ‌ها از `--tg-theme-*` خوانده می‌شوند، پس مینی‌اپ در حالت روشن/تاریک و با رنگ
-  انتخابی کاربر، هم‌شکل خود تلگرام است. دکمهٔ بازگشت تلگرام و بازخورد لمسی هم فعال است.
+- **Authentication:** the page sends `WebApp.initData` to the server and `src/miniapp.js` verifies
+  Telegram's signature with `HMAC-SHA256` (key: `WebAppData` + bot token). Tampered or stale
+  strings (default: older than 24 hours) are rejected with `403`.
+- **Stable session:** the mini app session key is `miniapp:<telegram user id>`, so closing and
+  reopening the mini app keeps the half-finished project and contact info, and the user continues
+  the same conversation.
+- **Plain browser:** outside Telegram, a `sessionId` in `localStorage` is used instead of initData,
+  so the same page works for browser testing.
+- **Data privacy:** the project list only exposes `name` and `fields` to the client; the base price
+  per meter and the pricing formula (the sheet's notes column) never reach the user's browser.
+- **Theme:** colors are read from `--tg-theme-*`, so the mini app matches Telegram in light/dark
+  mode and with the user's custom colors. Telegram's back button and haptic feedback are wired up.
 
 ---
 
-## API وب (لندینگ‌پیج و مینی‌اپ)
+## Web API (landing page and mini app)
 
-| مسیر | توضیح |
+| Route | Description |
 |---|---|
-| `GET /health` | سلامت سرور + تعداد نشست‌های فعال |
-| `GET /api/miniapp-status` | گزارش تشخیصی «چرا دکمهٔ مینی‌اپ در تلگرام نمی‌آید» (فارسی، با قدم‌های بعدی) |
-| `GET /app` | صفحهٔ مینی‌اپ تلگرام (همان صفحه با `GET /miniapp` هم باز می‌شود) |
+| `GET /health` | server health + number of active sessions |
+| `GET /api/miniapp-status` | diagnostic report "why is the mini app button missing" (Persian, with next steps) |
+| `GET /app` | the Telegram mini app page (same page at `GET /miniapp`) |
 | `GET /api/welcome` | `{ message, projects: [{name, fields}] }` |
-| `GET /api/projects` | `{ projects: [{name, fields}] }` — فقط لیست، بدون نشست |
-| `POST /api/state` | `{ initData \| sessionId }` → وضعیت جاری کاربر: `{ projects, project, contact, state }` |
-| `POST /api/select` | `{ initData \| sessionId, project }` → انتخاب قطعی پروژه و شروع مکالمهٔ تخمین (بدون مصرف سهمیهٔ AI) |
-| `POST /api/contact` | `{ initData \| sessionId, customerName, phone }` → ذخیرهٔ اطلاعات تماس لید |
+| `GET /api/projects` | `{ projects: [{name, fields}] }` — list only, no session |
+| `POST /api/state` | `{ initData \| sessionId }` → current user state: `{ projects, project, contact, state }` |
+| `POST /api/select` | `{ initData \| sessionId, project }` → definitive project selection and start of the estimate conversation (no AI quota used) |
+| `POST /api/contact` | `{ initData \| sessionId, customerName, phone }` → save the lead's contact info |
 | `POST /api/message` | `{ initData \| sessionId, text }` → `{ message, project?, projects? }` |
-| `POST /api/reset` | `{ initData \| sessionId }` → شروع مجدد |
-| `GET /demo` | ویجت چت آماده برای تست (بدون نیاز به لندینگ‌پیج) |
+| `POST /api/reset` | `{ initData \| sessionId }` → start over |
+| `GET /demo` | ready-made chat widget for testing (no landing page needed) |
 
-هویت کاربر با یکی از این دو فرستاده می‌شود:
+The user identity is sent as one of these two:
 
-- **`initData`** (مینی‌اپ تلگرام): رشتهٔ `WebApp.initData`؛ سرور امضای تلگرام را راستی‌آزمایی
-  می‌کند و کلید نشست از شناسهٔ کاربر ساخته می‌شود. منبع لید: `مینی‌اپ تلگرام`.
-- **`sessionId`** (لندینگ‌پیج): در سمت مرورگر با `crypto.randomUUID()` بسازید و در `localStorage`
-  نگه دارید تا با رفرش صفحه مکالمه حفظ شود. منبع لید: `لندینگ‌پیج`.
+- **`initData`** (Telegram mini app): the `WebApp.initData` string; the server verifies Telegram's
+  signature and the session key is derived from the user id. Lead source: `Telegram mini app`.
+- **`sessionId`** (landing page): create it in the browser with `crypto.randomUUID()` and keep it in
+  `localStorage` so a page refresh preserves the conversation. Lead source: `Landing page`.
 
-هر دو از **مسیرهای نسبی** استفاده می‌کنند، بنابراین پشت پراکسی/دامنهٔ Railway هم کار می‌کنند.
+Both use **relative paths**, so they work behind a proxy or the Railway domain.
 
-خطاهای ممکن: `400` ورودی نامعتبر، `403` initData نامعتبر یا منقضی، `413` پیام خیلی بلند،
-`429` عبور از سقف نرخ، `502/503` خطای سرویس هوش مصنوعی یا شیت.
-
----
-
-## رفتار ربات
-
-- کاربر می‌تواند پروژه را با **شماره** (`2`)، **اسم کامل** یا **اسم جزئی** (`نگین`) انتخاب کند.
-  در تلگرام علاوه بر آن یک کیبورد با اسم پروژه‌ها نمایش داده می‌شود.
-- اختلاف نگارش فارسی نادیده گرفته می‌شود: `پارسـيان 1`، `ساختمان‌نگین` و `اسمان` هم پیدا می‌شوند.
-- **سوییچ پروژه وسط مکالمه:** اگر کاربر وسط چت نام پروژهٔ فعال دیگری را بیاورد
-  (`نارنجستان ۵ منظرم بود`)، مکالمه به همان پروژه سوییچ می‌شود و سلام اولیهٔ جدید می‌گیرد؛
-  اگر نام با چند پروژه بخواند، ربات می‌پرسد «کدوم پروژه؟». جواب‌های عددی کاربر به سوال ربات
-  (`۲`) و اسم پروژهٔ آمده وسط یک جملهٔ بلندِ اطلاعات فایل، اشتباهاً سوییچ نمی‌کنند.
-- **سوال‌های غیرقیمتی به کارشناسان:** ربات فقط تخمین قیمت می‌دهد؛ سوال‌هایی مثل «خوبه؟»،
-  «کی تحویل می‌ده؟» یا «برای سرمایه‌گذاری می‌ارزه؟» را جواب نمی‌دهد و کاربر را به کارشناسان
-  دفتر دیار ارجاع می‌دهد.
-- بعد از اعلام قیمت و ثبت لید، مکالمه بسته نمی‌شود: کاربر می‌تواند شمارهٔ اشتباه را اصلاح کند و
-  **همان ردیف شیت** به‌روز می‌شود (ردیف تکراری ساخته نمی‌شود).
-- «شروع مجدد»، «از اول»، `/restart` و `/start` مکالمهٔ جدید باز می‌کنند.
-- اگر ثبت لید در شیت شکست بخورد، به کاربر **دروغ «ثبت شد» گفته نمی‌شود**؛ پیام خطا می‌گیرد و
-  می‌تواند `ثبت مجدد` بفرستد. اگر `ADMIN_CHAT_ID` تنظیم باشد، صورت‌جلسهٔ کامل مکالمه برای مدیر
-  ارسال می‌شود تا اطلاعات مشتری گم نشود.
+Possible errors: `400` invalid input, `403` invalid or expired initData, `413` message too long,
+`429` rate limit exceeded, `502/503` AI or sheet service error.
 
 ---
 
-## عیب‌یابی
+## Bot behavior
 
-| نشانه | علت احتمالی | راه‌حل |
+- The user can pick a project by **number** (`2`), **full name** or **partial name** (`Negin`).
+  In Telegram a keyboard with the project names is also shown.
+- Persian spelling differences are ignored: `پارسـيان 1`, `ساختمان‌نگین` and `اسمان` all match.
+- **Switching projects mid-conversation:** if the user names another active project during a chat
+  ("I meant Narestan 5"), the conversation switches to that project and sends its fresh greeting;
+  if the name matches several projects, the bot asks "which one?". Numeric answers to the bot's
+  questions (`2`) and a project name buried in a long file-info sentence do not trigger a switch.
+- **Non-price questions go to the experts:** the bot only produces price estimates; questions like
+  "is it good?", "when is delivery?" or "is it worth investing?" are not answered — the user is
+  referred to the Diar office experts.
+- After the estimate and lead save, the conversation stays open: the user can correct a wrong
+  number and **the same sheet row** is updated (no duplicate row is created).
+- "Start over", "from the beginning", `/restart` and `/start` open a new conversation.
+- If saving the lead to the sheet fails, the user is **never told a false "saved"**; they get an
+  error message and can send `retry save`. If `ADMIN_CHAT_ID` is set, the full conversation
+  transcript is sent to the admin so customer data is not lost.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| «پروژه فعالی تعریف نشده» | ستون `فعال؟` پر نیست یا تب `Projects` نام دیگری دارد | `npm run doctor` را اجرا کنید |
-| ربات قیمت پایه را نمی‌داند | مقدار قیمت در شیت متنی/نامعتبر است | doctor همان ردیف را گزارش می‌کند |
-| «کلید خصوصی قابل خواندن نیست» | `\n`های کلید از بین رفته | کلید را کامل از فایل JSON کپی کنید |
-| خطای 403 شیت | شیت با سرویس‌اکانت share نشده | `client_email` را Editor کنید |
-| «سرویس فعلاً شلوغه» | سهمیهٔ Gemini (429) | `GEMINI_THINKING_LEVEL=low` بگذارید یا پلن پولی |
-| خطای 409 تلگرام | دو نمونه از بات همزمان اجرا شده‌اند | فقط یک سرویس فعال نگه دارید |
-| پیام‌ها نصفه می‌رسد | پاسخ بلندتر از ۴۰۹۶ کاراکتر | خودکار تکه‌تکه می‌شود؛ اگر نشد لاگ را ببینید |
-| دکمهٔ مینی‌اپ در تلگرام نیست | `MINI_APP_URL` تنظیم نشده یا `https` نیست یا کلاینت تلگرام کش کرده | لاگ سرویس را ببینید؛ `/app` را به بات بفرستید؛ تلگرام را کامل ببندید و باز کنید |
-| مینی‌اپ صفحهٔ سفید/خطا می‌دهد | آدرس در تلگرام با دامنهٔ واقعی سرویس یکی نیست | `MINI_APP_URL` باید دقیقاً `https://دامنه/app` باشد |
-| «نشست تلگرام معتبر نیست» (403) | initData دست‌کاری شده یا `TELEGRAM_BOT_TOKEN` سرور با توکن بات یکی نیست | توکن درست را بگذارید؛ کاربر مینی‌اپ را دوباره باز کند |
-| مینی‌اپ بعد از مدتی 403 می‌دهد | عمر initData از `MINI_APP_INIT_DATA_MAX_AGE_SECONDS` گذشته | مینی‌اپ را ببندید و دوباره باز کنید (یا سقف را بیشتر کنید) |
-| لیدهای مینی‌اپ شمارهٔ تماس ندارند | کاربر «فعلاً بدون شماره» را زده | ربات در پایان مکالمه از او می‌خواهد شماره را در چت بنویسد |
+| "No active project defined" | The `Active?` column is empty or the `Projects` tab has another name | run `npm run doctor` |
+| Bot does not know the base price | The price value in the sheet is textual/invalid | doctor reports that exact row |
+| "Private key cannot be read" | The key's `\n`s were lost | copy the key fully from the JSON file |
+| Sheets 403 error | The sheet was not shared with the service account | add `client_email` as Editor |
+| "Service is busy right now" | Gemini quota (429) | set `GEMINI_THINKING_LEVEL=low` or a paid plan |
+| Telegram 409 error | Two bot instances running at once | keep only one active service |
+| Messages arrive in pieces | Reply longer than 4096 characters | chunked automatically; check logs if not |
+| Mini app button missing in Telegram | Menu button not created in BotFather, or Telegram client cache | create it in BotFather; send `/app` to the bot; fully close and reopen Telegram |
+| Mini app shows a white page/error | The Telegram URL does not match the real service domain | `MINI_APP_URL` must be exactly `https://domain/app` |
+| "Telegram session is not valid" (403) | initData tampered, or the server's `TELEGRAM_BOT_TOKEN` differs from the bot's | set the correct token; user reopens the mini app |
+| Mini app returns 403 after a while | initData age exceeded `MINI_APP_INIT_DATA_MAX_AGE_SECONDS` | close and reopen the mini app (or raise the limit) |
+| Mini app leads have no phone | The user tapped "continue without a number" | the bot asks for the number in chat at the end |
 
 ---
 
-## تغییرات نسخهٔ ۱.۲
+## Version 1.3 changes
 
-- **مینی‌اپ تلگرام** (`/app`): دو بخش خلوت و مینیمال — لیست پروژه‌ها با تخمین قیمتِ کلیکی، و چت با همان ربات.
-  رنگ‌ها از تم خود تلگرام، پشتیبانی از حالت تاریک، دکمهٔ بازگشت و بازخورد لمسی.
-- راستی‌آزمایی `initData` تلگرام روی سرور (`src/miniapp.js`)؛ کلید نشست از شناسهٔ کاربر تلگرام ساخته
-  می‌شود تا با بستن و باز کردن مینی‌اپ، مکالمهٔ نیمه‌تمام و اطلاعات تماس حفظ شود.
-- ورودی مینی‌اپ در تلگرام **دستی در BotFather** مدیریت می‌شود؛ سرویس هیچ‌وقت دکمهٔ منو را ست
-  یا بازنویسی نمی‌کند و زیر پیام‌ها دکمهٔ ورود به مینی‌اپ نمی‌گذارد. دستور `/app` آدرس را
-  به‌صورت متن ساده می‌فرستد و `/api/miniapp-status` وضعیت واقعی دکمه را گزارش می‌کند.
-- مسیرهای جدید API: `/api/projects`، `/api/state`، `/api/select`، `/api/contact`؛ و پذیرش `initData`
-  در `/api/message` و `/api/reset` (رفتار قبلی `sessionId` بدون تغییر).
-- انتخاب قطعی پروژه با کلیک (`selectProject`) بدون مصرف سهمیهٔ Gemini و بدون ریسک تطبیق اشتباه نام.
-- یکسان‌سازی شمارهٔ تماس (`normalizePhone`) برای فرم مینی‌اپ: `+98912…`، `۰۹۱۲ ۱۲۳ ۴۵۶۷` و `912…` یک شکل می‌شوند.
-- **رفع نشتی اطلاعات:** لیست پروژه‌ها در پاسخ API (و `/api/reset`) قبلاً آبجکت خام شیت را برمی‌گرداند که
-  شامل «قیمت پایه هر متر» و «فرمول قیمت‌گذاری» بود؛ حالا فقط `name` و `fields` به کلاینت می‌رود.
-- ابزار `npm run miniapp:preview` برای دیدن و کلیک‌کردن مینی‌اپ بدون کلید Gemini و گوگل‌شیت.
-- هم‌راستا شدن تست‌ها با رفتار جاری مکالمه (پیام خوش‌آمد بدون لیست شماره‌دار، و گرفتن نام/شماره از
-  `contact` به‌جای استخراج توسط AI) و افزودن ۲۲ تست جدید برای مینی‌اپ و شمارهٔ تماس؛ مجموعاً ۶۶ تست سبز.
-- پایدار شدن اجرای تست‌ها: لاگ‌های برنامه در تست‌های API بی‌صدا می‌شوند (`test/quiet.mjs`) تا با پروتکل
-  گزارش‌دهی `node:test` تداخل نکنند.
+- **Always-visible project search** in the mini app, with Persian-aware normalization (Arabic
+  ya/kaf, Latin digits, half-space, tatweel and diacritics) over project names and fields.
+- **Minimal animations** with three motifs — construction (cards rise like floors, a crane sways
+  while loading), deal (sliding tab indicator, a signature written on the contract, a drawn saved
+  checkmark) and money (price chip with a spinning coin and counting digits). All disabled under
+  `prefers-reduced-motion`.
+- **Project switching mid-chat** and referral of **non-price questions** to the office experts.
+- **Version stamp** in `/api/miniapp-status` (`build`: package version, mini-app file fingerprint,
+  Railway branch/commit/deployment) so it is always possible to tell which version is live.
+- **Mini app entry is fully manual in BotFather**: the service no longer registers or overwrites
+  the menu button and no longer puts an entry button under messages; `/app` sends the URL as plain
+  text. A scheme-less `MINI_APP_URL` is completed with `https://` automatically, and a non-HTTPS
+  URL can no longer take down whole bot messages.
+
+## Version 1.2 changes
+
+- **Telegram mini app** (`/app`): two sparse, minimal sections — a clickable project list with
+  price estimates, and chat with the same bot. Colors from Telegram's own theme, dark mode support,
+  back button and haptic feedback.
+- Server-side verification of Telegram `initData` (`src/miniapp.js`); the session key is derived
+  from the Telegram user id so closing and reopening the mini app preserves the half-finished
+  conversation and contact info.
+- New API routes: `/api/projects`, `/api/state`, `/api/select`, `/api/contact`; and `initData`
+  accepted by `/api/message` and `/api/reset` (previous `sessionId` behavior unchanged).
+- Definitive project selection by click (`selectProject`) without spending Gemini quota and without
+  the risk of a wrong name match.
+- Phone normalization (`normalizePhone`) for the mini app form: `+98912…`, `۰۹۱۲ ۱۲۳ ۴۵۶۷` and
+  `912…` all become one shape.
+- **Information leak fixed:** project lists in API responses (and `/api/reset`) previously returned
+  the raw sheet objects including "base price per meter" and the pricing formula; now only `name`
+  and `fields` go to the client.
+- `npm run miniapp:preview` tool to view and click the mini app without a Gemini key or sheet.
+- Tests aligned with current conversation behavior (welcome without a numbered list, and name/phone
+  taken from `contact` instead of AI extraction) plus 22 new tests for the mini app and contact;
+  66 green tests in total.
+- Stable test runs: application logs are silenced during API tests (`test/quiet.mjs`) so they do
+  not interfere with the `node:test` reporter protocol.
+
+## Version 1.1 changes
+
+- Migrated from the deprecated `@google/generative-ai` package to the official `@google/genai` SDK.
+- Real `systemInstruction` and removal of `temperature` (ignored by `gemini-3.6-flash` and later),
+  plus `thinkingLevel` configuration.
+- **One** Gemini request per user message instead of three (reply + done-detection + JSON
+  extraction); structured output via `responseSchema`, and the conversation history is no longer
+  polluted with meta messages.
+- Fixed `undefined` in the first message when the fields column was empty.
+- Correct parsing of sheet numbers (Persian digits and thousands separators) and field splitting on
+  the Persian comma.
+- Forgiving sheet header matching with clear reporting of missing columns (instead of silent empty).
+- Project selection by list number and normalization of ی/ي, ک/ك and half-space.
+- Messages after the conversation ends are no longer dropped, and lead correction is possible.
+- Honest lead saving: a sheet write failure = error message to the user + admin alert + retry.
+- Telegram long-message chunking, no empty messages, typing indicator renewal, bot error handler,
+  and no replies to group messages (unless mentioned).
+- Rate limiting and configurable CORS for the web API.
+- Added `.gitignore` and `.env.example`, the `npm run doctor` tool, the `/demo` page and 44 tests
+  (`npm test`).
 
 ---
 
-## تغییرات نسخهٔ ۱.۱
+## Cost and security
 
-- مهاجرت از پکیج منسوخ `@google/generative-ai` به SDK رسمی `@google/genai`.
-- استفاده از `systemInstruction` واقعی و حذف `temperature` (در `gemini-3.6-flash` به بعد نادیده گرفته می‌شود)
-  و تنظیم `thinkingLevel`.
-- **یک** درخواست به Gemini برای هر پیام کاربر به‌جای سه درخواست (پاسخ + تشخیص پایان + استخراج JSON)؛
-  خروجی ساخت‌یافته با `responseSchema` گرفته می‌شود و تاریخچهٔ مکالمه دیگر با پیام‌های متا آلوده نمی‌شود.
-- رفع نمایش `undefined` در اولین پیام، وقتی ستون فیلدها خالی بود.
-- خواندن درست اعداد شیت (ارقام فارسی و جداکنندهٔ هزارگان) و جدا کردن فیلدها با کامای فارسی.
-- تطبیق تحمل‌پذیر هدرهای شیت و گزارش روشن ستون‌های گم‌شده (به‌جای خالی‌بودن بی‌صدا).
-- انتخاب پروژه با شمارهٔ لیست و یکسان‌سازی ی/ي، ک/ك و نیم‌فاصله.
-- پیام‌های بعد از پایان مکالمه دیگر دور ریخته نمی‌شوند و امکان اصلاح لید وجود دارد.
-- صداقت در ثبت لید: شکست نوشتن در شیت = پیام خطا به کاربر + هشدار به مدیر + امکان تلاش مجدد.
-- شکستن پیام‌های بلند تلگرام، جلوگیری از ارسال پیام خالی، تمدید نشانگر تایپینگ،
-  هندلر خطای بات، و پاسخ‌ندادن به پیام‌های گروه (مگر منشن).
-- محدودسازی نرخ و CORS قابل تنظیم برای API وب.
-- افزودن `.gitignore` و `.env.example`، ابزار `npm run doctor`، صفحهٔ `/demo` و ۴۴ تست (`npm test`).
-
----
-
-## هزینه و امنیت
-
-- سهمیهٔ رایگان Gemini محدود است (تقریباً ۱۰ درخواست در دقیقه و ۱۵۰۰ درخواست در روز).
-  چون هر پیام کاربر فقط **یک** درخواست مصرف می‌کند، با هر مکالمهٔ کامل حدود ۴ تا ۶ درخواست مصرف می‌شود.
-- فایل `.env` هرگز commit نشود (در `.gitignore` هست). اگر اشتباهاً commit شد، کلیدها را **باطل** کنید.
-- `CORS_ORIGIN` را در محیط عملیاتی روی دامنهٔ خودتان تنظیم کنید تا کسی نتواند سهمیهٔ شما را بسوزاند.
+- The free Gemini quota is limited (roughly 10 requests per minute and 1500 per day). Since each
+  user message costs only **one** request, a full conversation uses about 4 to 6 requests.
+- Never commit the `.env` file (it is in `.gitignore`). If it was committed by mistake, **revoke**
+  the keys.
+- Set `CORS_ORIGIN` to your own domain in production so nobody can burn your quota.
